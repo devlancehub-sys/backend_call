@@ -10,11 +10,11 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   constructor(private config: ConfigService) {}
 
   async onModuleInit() {
-    const host = this.config.get('DB_HOST', 'localhost');
-    const port = this.config.get<number>('DB_PORT', 3306);
-    const user = this.config.get('DB_USER', 'root');
-    const password = this.config.get('DB_PASSWORD', '');
-    const database = this.config.get('DB_NAME', 'love_call');
+    const host = process.env.DB_HOST || this.config.get('DB_HOST', 'localhost');
+    const port = Number(process.env.DB_PORT || this.config.get('DB_PORT', 3306));
+    const user = process.env.DB_USER || this.config.get('DB_USER', 'root');
+    const password = process.env.DB_PASSWORD ?? this.config.get('DB_PASSWORD', '');
+    const database = process.env.DB_NAME || this.config.get('DB_NAME', 'love_call');
 
     this.pool = mysql.createPool({
       host,
