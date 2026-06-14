@@ -2,6 +2,9 @@
   "name": "love-call-backend",
   "version": "1.0.0",
   "description": "Love Call API - NestJS",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "build": "nest build",
     "start": "nest start",

@@ -16,6 +16,18 @@ npm run start:dev      # http://localhost:3000/api
 
 `GET /api/health`
 
+```json
+{
+  "status": "ok",
+  "message": "all okay",
+  "service": "love-call-nestjs-api",
+  "database": "ok",
+  "timestamp": "2026-06-14T12:00:00.000Z"
+}
+```
+
+If MySQL is down, returns `503` with `"status": "error"`.
+
 ## Auth
 
 - **Boys app:** `POST /api/auth/quick-login` with `{ name, device_id }` — no OTP
