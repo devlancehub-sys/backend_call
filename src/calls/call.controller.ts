@@ -1,19 +1,20 @@
 import { Body, Controller, Post, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CallsService } from './calls.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
 import { StartCallDto } from './dto/start-call.dto';
 import { EndCallDto } from './dto/end-call.dto';
 import { CallTokenDto } from './dto/call-token.dto';
 
-/** ZEGOCLOUD voice call APIs (production endpoints). */
+@ApiTags('Call (Zego)')
+@ApiBearerAuth('JWT')
 @Controller('call')
 @UseGuards(JwtAuthGuard)
 export class CallController {
   constructor(private readonly callsService: CallsService) {}
 
   @Post('start')
+  @ApiOperation({ summary: 'Start call — male sends host_id, female sends caller_id' })
   start(@Req() req: any, @Body() body: StartCallDto) {
     if (req.user.role === 'male') {
       if (!body.host_id) throw new BadRequestException('host_id is required');
@@ -29,11 +30,13 @@ export class CallController {
   }
 
   @Post('end')
+  @ApiOperation({ summary: 'End call by call_id' })
   end(@Req() req: any, @Body() body: EndCallDto) {
     return this.callsService.end(body.call_id, req.user.id);
   }
 
   @Post('token')
+  @ApiOperation({ summary: 'Generate Zego token for voice call room' })
   token(@Req() req: any, @Body() body: CallTokenDto) {
     return this.callsService.generateCallToken(body.call_id, req.user.id);
   }

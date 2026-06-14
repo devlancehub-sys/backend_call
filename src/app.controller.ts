@@ -1,11 +1,14 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { DatabaseService } from './database/database.service';
 
+@ApiTags('Health')
 @Controller()
 export class AppController {
   constructor(private readonly db: DatabaseService) {}
 
   @Get('health')
+  @ApiOperation({ summary: 'Health check — API and database status' })
   async health() {
     let database = 'ok';
 
