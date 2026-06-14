@@ -32,6 +32,13 @@ export class HostsController {
     return this.hostsService.getFeatured();
   }
 
+  @Get('favorites')
+  @UseGuards(RolesGuard)
+  @Roles('male')
+  getFavorites(@Req() req: any) {
+    return this.hostsService.getFavorites(req.user.id);
+  }
+
   @Get(':id')
   getById(@Param('id') id: string) {
     return this.hostsService.getById(+id);

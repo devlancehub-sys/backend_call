@@ -1,8 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../database/database.service';
-import { VerifyOtpDto } from './dto/auth.dto';
+import { QuickLoginDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
@@ -12,13 +12,15 @@ export class AuthService {
     private config: ConfigService,
   ) {}
 
-  sendOtp(phone: string) {
-    return { success: true, message: 'OTP sent', otp: '123456' };
-  }
-
-  async verifyOtp(dto: VerifyOtpDto) {
-    if (dto.otp !== '123456') {
-      throw new UnauthorizedException('Invalid OTP');
+  /** Boys quick login — name + device_id only, no OTP */
+  async quickLogin(dto: QuickLoginDto) {
+    const name = dto.name.trim();
+    const deviceId = dto.device_id.trim();
+    if (!name || name.length < 2) {
+      throw new BadRequestException('Enter a valid name');
+    }
+    if (!deviceId) {
+      throw new BadRequestException('device_id is required');
     }
 
     const pool = this.db.getPool();
@@ -26,32 +28,30 @@ export class AuthService {
 
     try {
       await conn.beginTransaction();
-      const [existing] = await conn.query<any[]>('SELECT * FROM users WHERE phone = ?', [dto.phone]);
+
+      const [existing] = await conn.query<any[]>(
+        'SELECT * FROM users WHERE device_id = ? AND role = ?',
+        [deviceId, 'male'],
+      );
+
       let user: any;
 
-      if (!existing.length) {
-        const [result] = await conn.query<any>(
-          'INSERT INTO users (phone, role, device_id, fcm_token) VALUES (?, ?, ?, ?)',
-          [dto.phone, dto.role, dto.device_id || null, dto.fcm_token || null],
-        );
-        user = { id: result.insertId, phone: dto.phone, role: dto.role, name: null };
-
-        await conn.query('INSERT INTO wallets (user_id, balance) VALUES (?, 0)', [user.id]);
-
-        if (dto.role === 'female') {
-          const rate = this.config.get('DEFAULT_HOST_RATE', 25);
-          await conn.query('INSERT INTO female_hosts (user_id, rate_per_minute) VALUES (?, ?)', [
-            user.id,
-            rate,
-          ]);
-        }
-      } else {
+      if (existing.length) {
         user = existing[0];
-        await conn.query('UPDATE users SET device_id = ?, fcm_token = ? WHERE id = ?', [
-          dto.device_id || user.device_id,
+        await conn.query('UPDATE users SET name = ?, fcm_token = ? WHERE id = ?', [
+          name,
           dto.fcm_token || user.fcm_token,
           user.id,
         ]);
+        user.name = name;
+      } else {
+        const phone = `9${Date.now().toString().slice(-9)}`;
+        const [result] = await conn.query<any>(
+          'INSERT INTO users (phone, role, name, device_id, fcm_token) VALUES (?, ?, ?, ?, ?)',
+          [phone, 'male', name, deviceId, dto.fcm_token || null],
+        );
+        user = { id: result.insertId, phone, role: 'male', name };
+        await conn.query('INSERT INTO wallets (user_id, balance) VALUES (?, 0)', [user.id]);
       }
 
       const tokens = this.generateTokens(user);
@@ -59,7 +59,7 @@ export class AuthService {
 
       await conn.query(
         'INSERT INTO refresh_tokens (user_id, token, device_id, expires_at) VALUES (?, ?, ?, ?)',
-        [user.id, tokens.refreshToken, dto.device_id || null, expiresAt],
+        [user.id, tokens.refreshToken, deviceId, expiresAt],
       );
 
       await conn.commit();

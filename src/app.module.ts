@@ -11,7 +11,6 @@ import { WalletModule } from './wallet/wallet.module';
 import { CallsModule } from './calls/calls.module';
 import { EarningsModule } from './earnings/earnings.module';
 import { WithdrawModule } from './withdraw/withdraw.module';
-import { KycModule } from './kyc/kyc.module';
 import { LanguagesModule } from './languages/languages.module';
 import { AdminModule } from './admin/admin.module';
 import { SocketModule } from './socket/socket.module';
@@ -31,7 +30,6 @@ import { AppController } from './app.controller';
     CallsModule,
     EarningsModule,
     WithdrawModule,
-    KycModule,
     LanguagesModule,
     AdminModule,
     SocketModule,

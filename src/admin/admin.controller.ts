@@ -22,16 +22,6 @@ export class AdminController {
     return this.adminService.getHosts();
   }
 
-  @Put('kyc/:userId/approve')
-  approveKyc(@Param('userId') userId: string) {
-    return this.adminService.approveKyc(+userId);
-  }
-
-  @Put('kyc/:userId/reject')
-  rejectKyc(@Param('userId') userId: string, @Body('note') note: string) {
-    return this.adminService.rejectKyc(+userId, note);
-  }
-
   @Get('calls')
   getCalls() {
     return this.adminService.getCalls();

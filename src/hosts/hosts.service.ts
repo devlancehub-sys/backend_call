@@ -14,7 +14,7 @@ export class HostsService {
              fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured
       FROM users u
       JOIN female_hosts fh ON fh.user_id = u.id
-      WHERE u.role = 'female' AND u.is_active = 1 AND fh.kyc_status = 'approved'
+      WHERE u.role = 'female' AND u.is_active = 1
     `;
     const params: any[] = [];
 
@@ -40,7 +40,7 @@ export class HostsService {
     const hosts = await this.db.query(
       `SELECT u.id, u.name, u.age, u.avatar_url, fh.rate_per_minute, fh.rating, fh.total_calls
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.role = 'female' AND u.is_online = 1 AND fh.kyc_status = 'approved'
+       WHERE u.role = 'female' AND u.is_online = 1
        ORDER BY fh.rating DESC LIMIT 20`,
     );
     return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };
@@ -51,8 +51,22 @@ export class HostsService {
       `SELECT u.id, u.name, u.age, u.avatar_url, fh.rate_per_minute, fh.rating,
               fh.total_calls, u.is_online
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.role = 'female' AND fh.is_featured = 1 AND fh.kyc_status = 'approved'
+       WHERE u.role = 'female' AND fh.is_featured = 1
        ORDER BY u.is_online DESC LIMIT 10`,
+    );
+    return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };
+  }
+
+  async getFavorites(userId: number) {
+    const hosts = await this.db.query(
+      `SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
+              fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured
+       FROM favorites f
+       JOIN users u ON u.id = f.host_id
+       JOIN female_hosts fh ON fh.user_id = u.id
+       WHERE f.user_id = ? AND u.role = 'female'
+       ORDER BY u.is_online DESC`,
+      [userId],
     );
     return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };
   }

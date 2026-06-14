@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { DatabaseService } from '../database/database.service';
+import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { CreateHostDto, HostLoginDto } from './dto/host-auth.dto';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class HostAuthService {
     private db: DatabaseService,
     private jwt: JwtService,
     private config: ConfigService,
+    private platformSettings: PlatformSettingsService,
   ) {}
 
   async login(dto: HostLoginDto) {
@@ -99,7 +101,7 @@ export class HostAuthService {
       const userId = result.insertId;
       await conn.query('INSERT INTO wallets (user_id, balance) VALUES (?, 0)', [userId]);
 
-      const rate = this.config.get('DEFAULT_HOST_RATE', 25);
+      const rate = this.platformSettings.getDefaultHostRate();
       await conn.query(
         `INSERT INTO female_hosts (user_id, rate_per_minute, kyc_status) VALUES (?, ?, 'approved')`,
         [userId, rate],

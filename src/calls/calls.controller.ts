@@ -31,13 +31,13 @@ export class CallsController {
   }
 
   @Post(':id/reject')
-  reject(@Param('id') id: string) {
-    return this.callsService.reject(+id);
+  reject(@Req() req: any, @Param('id') id: string) {
+    return this.callsService.reject(+id, req.user.id, req.user.role);
   }
 
   @Post(':id/end')
-  end(@Param('id') id: string) {
-    return this.callsService.end(+id);
+  end(@Req() req: any, @Param('id') id: string) {
+    return this.callsService.end(+id, req.user.id);
   }
 
   @Get('history')

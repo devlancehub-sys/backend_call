@@ -14,6 +14,7 @@ import {
   resolveEffectiveRate,
 } from '../common/utils/rate-tier.util';
 import { ZegoTokenService } from '../zego/zego-token.service';
+import { PlatformSettingsService } from '../common/services/platform-settings.service';
 
 @Injectable()
 export class CallsService {
@@ -22,6 +23,7 @@ export class CallsService {
     private config: ConfigService,
     private socket: SocketGateway,
     private zegoToken: ZegoTokenService,
+    private platformSettings: PlatformSettingsService,
   ) {}
 
   /** Boy calls girl — money always deducted from boy (caller_id) */
@@ -30,7 +32,7 @@ export class CallsService {
       `SELECT u.id, u.name, u.is_online, fh.total_calls
        FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.id = ? AND u.role = 'female' AND fh.kyc_status = 'approved'`,
+       WHERE u.id = ? AND u.role = 'female'`,
       [hostId],
     );
 
@@ -71,7 +73,7 @@ export class CallsService {
     const hosts = await this.db.query<any[]>(
       `SELECT u.id, u.name, fh.total_calls FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.id = ? AND u.role = 'female' AND fh.kyc_status = 'approved'`,
+       WHERE u.id = ? AND u.role = 'female'`,
       [hostId],
     );
     if (!hosts.length) throw new NotFoundException('Host profile not found');
@@ -163,15 +165,35 @@ export class CallsService {
     };
   }
 
-  async reject(callId: number) {
+  async reject(callId: number, userId: number, role: string) {
+    const calls = await this.db.query<any[]>(
+      `SELECT * FROM calls WHERE id = ? AND status = 'ringing'`,
+      [callId],
+    );
+    if (!calls.length) throw new NotFoundException('Call not found');
+
+    const call = calls[0];
+    const initiatedBy = call.initiated_by || 'male';
+
+    if (initiatedBy === 'male' && (role !== 'female' || call.host_id !== userId)) {
+      throw new ForbiddenException('Only the host can reject this call');
+    }
+    if (initiatedBy === 'female' && (role !== 'male' || call.caller_id !== userId)) {
+      throw new ForbiddenException('Only the user can reject this call');
+    }
+
     await this.db.query(`UPDATE calls SET status = 'rejected', ended_at = NOW() WHERE id = ?`, [
       callId,
     ]);
+
+    const notifyId = initiatedBy === 'male' ? call.caller_id : call.host_id;
+    this.socket.notifyUser(notifyId, 'call_rejected', { call_id: callId });
+
     return { success: true, message: 'Call rejected' };
   }
 
   /** End call — always deduct from caller_id (male), host (female) earns */
-  async end(callId: number) {
+  async end(callId: number, userId: number) {
     const calls = await this.db.query<any[]>(
       `SELECT * FROM calls WHERE id = ? AND status = 'active'`,
       [callId],
@@ -179,10 +201,14 @@ export class CallsService {
     if (!calls.length) throw new NotFoundException('Active call not found');
 
     const call = calls[0];
+    if (call.caller_id !== userId && call.host_id !== userId) {
+      throw new ForbiddenException('You are not a participant in this call');
+    }
+
     const durationSeconds = Math.floor(
       (Date.now() - new Date(call.started_at).getTime()) / 1000,
     );
-    const commissionPct = parseFloat(this.config.get('COMMISSION_PERCENTAGE', '30'));
+    const commissionPct = this.platformSettings.getCommissionPercentage();
     const billing = calculateBilling(
       durationSeconds,
       parseFloat(call.rate_per_minute),
@@ -248,19 +274,31 @@ export class CallsService {
 
       await conn.commit();
 
-      this.socket.notifyUser(call.caller_id, 'wallet_updated', { user_id: call.caller_id });
-      this.socket.notifyUser(call.host_id, 'earning_updated', { host_id: call.host_id });
+      const endPayload = {
+        call_id: call.id,
+        duration_seconds: durationSeconds,
+        billable_minutes: billing.billableMinutes,
+        rate_per_minute: parseFloat(call.rate_per_minute),
+        amount_deducted: billing.totalAmount,
+        host_earning: billing.hostEarning,
+        platform_commission: billing.platformCommission,
+        paid_by: 'caller' as const,
+      };
+
+      this.socket.notifyUser(call.caller_id, 'wallet_updated', {
+        user_id: call.caller_id,
+        balance: newBalance,
+      });
+      this.socket.notifyUser(call.host_id, 'earning_updated', {
+        host_id: call.host_id,
+        amount: billing.hostEarning,
+      });
+      this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
+      this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
 
       return {
         success: true,
-        data: {
-          call_id: call.id,
-          duration_seconds: durationSeconds,
-          amount_deducted: billing.totalAmount,
-          host_earning: billing.hostEarning,
-          platform_commission: billing.platformCommission,
-          paid_by: 'caller',
-        },
+        data: endPayload,
       };
     } catch (err) {
       await conn.rollback();
@@ -361,7 +399,7 @@ export class CallsService {
       [callerId],
     );
     if (parseFloat(wallets[0]?.balance || 0) < ratePerMinute) {
-      throw new BadRequestException('User has insufficient balance for this call');
+      throw new BadRequestException('Insufficient balance');
     }
   }
 }

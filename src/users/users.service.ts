@@ -7,7 +7,7 @@ export class UsersService {
 
   async getProfile(userId: number) {
     const users = await this.db.query<any[]>(
-      `SELECT u.id, u.phone, u.role, u.name, u.email, u.avatar_url, u.age, u.about, u.is_online,
+      `SELECT u.id, u.phone, u.username, u.role, u.name, u.email, u.avatar_url, u.age, u.about, u.is_online,
               w.balance, fh.rate_per_minute, fh.kyc_status, fh.rating, fh.total_calls
        FROM users u
        LEFT JOIN wallets w ON w.user_id = u.id

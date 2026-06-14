@@ -1,23 +1,12 @@
-import { IsString, IsOptional, IsIn } from 'class-validator';
+import { IsString, IsOptional, MinLength } from 'class-validator';
 
-export class SendOtpDto {
+export class QuickLoginDto {
   @IsString()
-  phone: string;
-}
-
-export class VerifyOtpDto {
-  @IsString()
-  phone: string;
+  @MinLength(2)
+  name: string;
 
   @IsString()
-  otp: string;
-
-  @IsIn(['male', 'female'])
-  role: 'male' | 'female';
-
-  @IsOptional()
-  @IsString()
-  device_id?: string;
+  device_id: string;
 
   @IsOptional()
   @IsString()

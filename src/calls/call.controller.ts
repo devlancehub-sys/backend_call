@@ -29,8 +29,8 @@ export class CallController {
   }
 
   @Post('end')
-  end(@Body() body: EndCallDto) {
-    return this.callsService.end(body.call_id);
+  end(@Req() req: any, @Body() body: EndCallDto) {
+    return this.callsService.end(body.call_id, req.user.id);
   }
 
   @Post('token')

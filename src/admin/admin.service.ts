@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { PlatformSettingsService } from '../common/services/platform-settings.service';
 
 @Injectable()
 export class AdminService {
-  constructor(private db: DatabaseService) {}
+  constructor(
+    private db: DatabaseService,
+    private platformSettings: PlatformSettingsService,
+  ) {}
 
   async getDashboard() {
     const [[users]] = await this.db.getPool().query<any[]>(
@@ -21,9 +25,6 @@ export class AdminService {
     const [[revenue]] = await this.db.getPool().query<any[]>(
       'SELECT COALESCE(SUM(platform_commission), 0) as total FROM calls WHERE status = "ended"',
     );
-    const [[pendingKyc]] = await this.db.getPool().query<any[]>(
-      'SELECT COUNT(*) as total FROM female_hosts WHERE kyc_status = "submitted"',
-    );
     const [[pendingWithdraw]] = await this.db.getPool().query<any[]>(
       'SELECT COUNT(*) as total FROM withdraw_requests WHERE status = "pending"',
     );
@@ -36,7 +37,6 @@ export class AdminService {
         online_hosts: onlineHosts.total,
         active_calls: activeCalls.total,
         total_revenue: parseFloat(revenue.total),
-        pending_kyc: pendingKyc.total,
         pending_withdrawals: pendingWithdraw.total,
       },
     };
@@ -56,29 +56,11 @@ export class AdminService {
 
   async getHosts() {
     const hosts = await this.db.query(
-      `SELECT u.id, u.name, u.phone, u.username, u.is_online, fh.rate_per_minute, fh.kyc_status,
+      `SELECT u.id, u.name, u.phone, u.username, u.is_online, fh.rate_per_minute,
               fh.total_calls, fh.rating, fh.is_featured
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id ORDER BY u.created_at DESC`,
     );
     return { success: true, data: hosts };
-  }
-
-  async approveKyc(userId: number) {
-    await this.db.query('UPDATE female_hosts SET kyc_status = "approved" WHERE user_id = ?', [userId]);
-    await this.db.query(
-      'UPDATE kyc_documents SET status = "approved", verified_at = NOW() WHERE user_id = ?',
-      [userId],
-    );
-    return { success: true, message: 'KYC approved' };
-  }
-
-  async rejectKyc(userId: number, note: string) {
-    await this.db.query('UPDATE female_hosts SET kyc_status = "rejected" WHERE user_id = ?', [userId]);
-    await this.db.query(
-      'UPDATE kyc_documents SET status = "rejected", admin_note = ? WHERE user_id = ?',
-      [note, userId],
-    );
-    return { success: true, message: 'KYC rejected' };
   }
 
   async getCalls() {
@@ -120,6 +102,7 @@ export class AdminService {
         [key, value, value],
       );
     }
+    await this.platformSettings.refresh();
     return { success: true, message: 'Settings updated' };
   }
 }
