@@ -1,0 +1,43 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+import { DatabaseModule } from './database/database.module';
+import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { HostsModule } from './hosts/hosts.module';
+import { CallersModule } from './callers/callers.module';
+import { WalletModule } from './wallet/wallet.module';
+import { CallsModule } from './calls/calls.module';
+import { EarningsModule } from './earnings/earnings.module';
+import { WithdrawModule } from './withdraw/withdraw.module';
+import { KycModule } from './kyc/kyc.module';
+import { LanguagesModule } from './languages/languages.module';
+import { AdminModule } from './admin/admin.module';
+import { SocketModule } from './socket/socket.module';
+import { HostAuthModule } from './host-auth/host-auth.module';
+import { AppController } from './app.controller';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 200 }]),
+    DatabaseModule,
+    AuthModule,
+    UsersModule,
+    HostsModule,
+    CallersModule,
+    WalletModule,
+    CallsModule,
+    EarningsModule,
+    WithdrawModule,
+    KycModule,
+    LanguagesModule,
+    AdminModule,
+    SocketModule,
+    HostAuthModule,
+  ],
+  controllers: [AppController],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+})
+export class AppModule {}
