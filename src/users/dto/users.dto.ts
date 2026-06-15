@@ -40,3 +40,14 @@ export class OnlineStatusDto {
   @IsBoolean()
   is_online: boolean;
 }
+
+export class UpdateDeviceDto {
+  @ApiProperty({ example: 'device-uuid-abc123' })
+  @IsString()
+  device_id: string;
+
+  @ApiPropertyOptional({ example: 'fcm-token-xyz' })
+  @IsOptional()
+  @IsString()
+  fcm_token?: string;
+}

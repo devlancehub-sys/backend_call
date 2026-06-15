@@ -2,7 +2,7 @@ import { Controller, Get, Put, Body, UseGuards, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { OnlineStatusDto, UpdateLanguagesDto, UpdateProfileDto } from './dto/users.dto';
+import { OnlineStatusDto, UpdateDeviceDto, UpdateLanguagesDto, UpdateProfileDto } from './dto/users.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT')
@@ -33,5 +33,11 @@ export class UsersController {
   @ApiOperation({ summary: 'Set online/offline status' })
   setOnlineStatus(@Req() req: any, @Body() body: OnlineStatusDto) {
     return this.usersService.setOnlineStatus(req.user.id, body.is_online);
+  }
+
+  @Put('device')
+  @ApiOperation({ summary: 'Update device_id and fcm_token for push notifications' })
+  updateDevice(@Req() req: any, @Body() body: UpdateDeviceDto) {
+    return this.usersService.updateDevice(req.user.id, body.device_id, body.fcm_token);
   }
 }

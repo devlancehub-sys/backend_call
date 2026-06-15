@@ -91,6 +91,16 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Added users.device_id column');
     }
 
+    if (!(await this.hasColumn('users', 'fcm_token'))) {
+      await this.query('ALTER TABLE users ADD COLUMN fcm_token VARCHAR(500) NULL');
+      this.logger.log('Added users.fcm_token column');
+    }
+
+    if (!(await this.hasColumn('users', 'name'))) {
+      await this.query('ALTER TABLE users ADD COLUMN name VARCHAR(100) NULL');
+      this.logger.log('Added users.name column');
+    }
+
     if (!(await this.hasColumn('users', 'username'))) {
       await this.query('ALTER TABLE users ADD COLUMN username VARCHAR(50) NULL UNIQUE');
       this.logger.log('Added users.username column');

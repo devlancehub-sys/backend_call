@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../database/database.service';
@@ -6,6 +6,8 @@ import { QuickLoginDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private db: DatabaseService,
     private jwt: JwtService,
@@ -29,10 +31,11 @@ export class AuthService {
     try {
       await conn.beginTransaction();
 
-      const [existing] = await conn.query<any[]>(
+      const [rows] = await conn.query<any[]>(
         'SELECT * FROM users WHERE device_id = ? AND role = ?',
         [deviceId, 'male'],
       );
+      const existing = Array.isArray(rows) ? rows : [];
 
       let user: any;
 
@@ -44,8 +47,16 @@ export class AuthService {
           user.id,
         ]);
         user.name = name;
+
+        const [walletRows] = await conn.query<any[]>(
+          'SELECT id FROM wallets WHERE user_id = ? LIMIT 1',
+          [user.id],
+        );
+        if (!Array.isArray(walletRows) || walletRows.length === 0) {
+          await conn.query('INSERT INTO wallets (user_id, balance) VALUES (?, 0)', [user.id]);
+        }
       } else {
-        const phone = `9${Date.now().toString().slice(-9)}`;
+        const phone = `9${Date.now()}${Math.floor(Math.random() * 90 + 10)}`.slice(0, 15);
         const [result] = await conn.query<any>(
           'INSERT INTO users (phone, role, name, device_id, fcm_token) VALUES (?, ?, ?, ?, ?)',
           [phone, 'male', name, deviceId, dto.fcm_token || null],
@@ -73,7 +84,9 @@ export class AuthService {
       };
     } catch (err) {
       await conn.rollback();
-      throw err;
+      this.logger.error(`quickLogin failed: ${(err as Error)?.message || err}`);
+      if (err instanceof BadRequestException) throw err;
+      throw new InternalServerErrorException('Login failed. Please try again.');
     } finally {
       conn.release();
     }

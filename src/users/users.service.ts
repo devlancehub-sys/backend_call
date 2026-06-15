@@ -63,4 +63,17 @@ export class UsersService {
     ]);
     return { success: true, data: { is_online: isOnline } };
   }
+
+  async updateDevice(userId: number, deviceId: string, fcmToken?: string) {
+    const rows = await this.db.query<any[]>('SELECT fcm_token FROM users WHERE id = ?', [userId]);
+    const current = rows[0]?.fcm_token;
+
+    await this.db.query('UPDATE users SET device_id = ?, fcm_token = ? WHERE id = ?', [
+      deviceId,
+      fcmToken ?? current ?? null,
+      userId,
+    ]);
+
+    return { success: true, message: 'Device updated' };
+  }
 }
