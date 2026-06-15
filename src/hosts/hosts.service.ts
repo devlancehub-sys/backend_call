@@ -1,6 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { enrichHostRates } from '../common/utils/rate-tier.util';
+import {
+  defaultGirlAvatarUrl,
+  normalizeGirlAvatarUrl,
+} from '../common/utils/avatar.util';
+
+function withHostAvatar(host: Record<string, unknown>) {
+  const enriched = enrichHostRates(host);
+  return {
+    ...enriched,
+    avatar_url:
+      normalizeGirlAvatarUrl(enriched.avatar_url as string) ?? defaultGirlAvatarUrl(),
+  };
+}
 
 @Injectable()
 export class HostsService {
@@ -33,7 +46,7 @@ export class HostsService {
     params.push(limitNum, offsetNum);
 
     const hosts = await this.db.query(sql, params);
-    return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
   }
 
   async getOnline() {
@@ -44,7 +57,7 @@ export class HostsService {
        WHERE u.role = 'female' AND u.is_active = 1 AND u.is_online = 1
        ORDER BY fh.rating DESC LIMIT 20`,
     );
-    return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
   }
 
   async getFeatured() {
@@ -55,7 +68,7 @@ export class HostsService {
        WHERE u.role = 'female' AND fh.is_featured = 1
        ORDER BY u.is_online DESC LIMIT 10`,
     );
-    return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
   }
 
   async getFavorites(userId: number) {
@@ -69,7 +82,7 @@ export class HostsService {
        ORDER BY u.is_online DESC`,
       [userId],
     );
-    return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
   }
 
   async getById(id: number) {
@@ -90,7 +103,7 @@ export class HostsService {
 
     return {
       success: true,
-      data: { ...enrichHostRates(hosts[0]), languages: langs },
+      data: { ...withHostAvatar(hosts[0]), languages: langs },
     };
   }
 

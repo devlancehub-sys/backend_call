@@ -22,7 +22,7 @@ export class UpdateProfileDto {
   @IsString()
   about?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.example.com/avatar.jpg' })
+  @ApiPropertyOptional({ example: 'avatar_05.svg', description: 'Preset avatar filename for girls' })
   @IsOptional()
   @IsString()
   avatar_url?: string;

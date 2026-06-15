@@ -116,10 +116,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   /** Push event to a specific user (e.g. boy gets call when girl initiates) */
-  notifyUser(userId: number, event: string, data: Record<string, unknown>) {
+  notifyUser(userId: number, event: string, data: Record<string, unknown>): boolean {
     const socketId = this.onlineUsers.get(userId);
     if (socketId) {
       this.server.to(socketId).emit(event, data);
+      return true;
     }
+    return false;
+  }
+
+  isUserOnline(userId: number): boolean {
+    return this.onlineUsers.has(userId);
   }
 }

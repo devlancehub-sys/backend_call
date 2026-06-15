@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import {
+  defaultGirlAvatarUrl,
+  normalizeGirlAvatarUrl,
+} from '../common/utils/avatar.util';
 
 @Injectable()
 export class UsersService {
@@ -22,14 +26,34 @@ export class UsersService {
       [userId],
     );
 
-    return { success: true, data: { ...users[0], languages: langs } };
+    const profile = { ...users[0], languages: langs };
+    if (profile.role === 'female') {
+      profile.avatar_url =
+        normalizeGirlAvatarUrl(profile.avatar_url) ?? defaultGirlAvatarUrl();
+    }
+
+    return { success: true, data: profile };
   }
 
   async updateProfile(userId: number, body: any) {
     const { name, email, age, about, avatar_url } = body;
+
+    const users = await this.db.query<any[]>('SELECT role FROM users WHERE id = ?', [
+      userId,
+    ]);
+    const role = users[0]?.role as string | undefined;
+
+    let storedAvatar = avatar_url;
+    if (role === 'female') {
+      storedAvatar =
+        avatar_url != null && avatar_url !== ''
+          ? normalizeGirlAvatarUrl(avatar_url) ?? defaultGirlAvatarUrl()
+          : avatar_url;
+    }
+
     await this.db.query(
       'UPDATE users SET name = ?, email = ?, age = ?, about = ?, avatar_url = ? WHERE id = ?',
-      [name, email, age, about, avatar_url, userId],
+      [name, email, age, about, storedAvatar, userId],
     );
     return { success: true, message: 'Profile updated' };
   }

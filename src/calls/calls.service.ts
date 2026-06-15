@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
@@ -16,8 +17,13 @@ import {
 import { ZegoTokenService } from '../zego/zego-token.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 
+const RING_TIMEOUT_MS = 45_000;
+
 @Injectable()
 export class CallsService {
+  private readonly logger = new Logger(CallsService.name);
+  private readonly ringTimeouts = new Map<number, NodeJS.Timeout>();
+
   constructor(
     private db: DatabaseService,
     private config: ConfigService,
@@ -28,8 +34,12 @@ export class CallsService {
 
   /** Boy calls girl — money always deducted from boy (caller_id) */
   async initiate(callerId: number, hostId: number) {
+    if (!this.socket.isUserOnline(hostId)) {
+      throw new BadRequestException('User is offline');
+    }
+
     const hosts = await this.db.query<any[]>(
-      `SELECT u.id, u.name, u.is_online, fh.total_calls
+      `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls
        FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id
        WHERE u.id = ? AND u.role = 'female'`,
@@ -37,7 +47,11 @@ export class CallsService {
     );
 
     if (!hosts.length) throw new NotFoundException('Host not found');
-    if (!hosts[0].is_online) throw new BadRequestException('Host is offline');
+
+    const callers = await this.db.query<any[]>(
+      `SELECT id, name, avatar_url FROM users WHERE id = ? AND role = 'male'`,
+      [callerId],
+    );
 
     const totalCalls = parseInt(String(hosts[0].total_calls ?? 0), 10);
     const hostLevel = getHostLevel(totalCalls);
@@ -61,17 +75,33 @@ export class CallsService {
       ratePerMinute,
       hostLevel,
       initiatedBy: 'male',
+      hostName: hosts[0].name,
+      hostAvatarUrl: hosts[0].avatar_url,
+      callerName: callers[0]?.name,
+      callerAvatarUrl: callers[0]?.avatar_url,
     });
 
-    this.socket.notifyUser(hostId, 'incoming_call', payload);
+    const delivered = this.socket.notifyUser(hostId, 'incoming_call', payload);
+    if (!delivered) {
+      await this.db.query(`UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`, [
+        callId,
+      ]);
+      throw new BadRequestException('User is offline');
+    }
+
+    this.scheduleMissedCallTimeout(callId, callerId, hostId, 'male');
 
     return { success: true, data: payload };
   }
 
   /** Girl calls boy — still deducts from boy's wallet only */
   async initiateFromHost(hostId: number, callerId: number) {
+    if (!this.socket.isUserOnline(callerId)) {
+      throw new BadRequestException('User is offline');
+    }
+
     const hosts = await this.db.query<any[]>(
-      `SELECT u.id, u.name, fh.total_calls FROM users u
+      `SELECT u.id, u.name, u.avatar_url, fh.total_calls FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id
        WHERE u.id = ? AND u.role = 'female'`,
       [hostId],
@@ -79,12 +109,11 @@ export class CallsService {
     if (!hosts.length) throw new NotFoundException('Host profile not found');
 
     const callers = await this.db.query<any[]>(
-      `SELECT u.id, u.name, u.is_online FROM users u
+      `SELECT u.id, u.name, u.avatar_url, u.is_online FROM users u
        WHERE u.id = ? AND u.role = 'male' AND u.is_active = 1`,
       [callerId],
     );
     if (!callers.length) throw new NotFoundException('User not found');
-    if (!callers[0].is_online) throw new BadRequestException('User is offline');
 
     const totalCalls = parseInt(String(hosts[0].total_calls ?? 0), 10);
     const hostLevel = getHostLevel(totalCalls);
@@ -109,15 +138,27 @@ export class CallsService {
       hostLevel,
       initiatedBy: 'female',
       hostName: hosts[0].name,
+      hostAvatarUrl: hosts[0].avatar_url,
       callerName: callers[0].name,
+      callerAvatarUrl: callers[0].avatar_url,
     });
 
-    this.socket.notifyUser(callerId, 'incoming_call', payload);
+    const delivered = this.socket.notifyUser(callerId, 'incoming_call', payload);
+    if (!delivered) {
+      await this.db.query(`UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`, [
+        callId,
+      ]);
+      throw new BadRequestException('User is offline');
+    }
+
+    this.scheduleMissedCallTimeout(callId, callerId, hostId, 'female');
 
     return { success: true, data: payload };
   }
 
   async accept(callId: number, userId: number, role: string) {
+    this.clearRingTimeout(callId);
+
     const calls = await this.db.query<any[]>(
       `SELECT * FROM calls WHERE id = ? AND status = 'ringing'`,
       [callId],
@@ -166,6 +207,8 @@ export class CallsService {
   }
 
   async reject(callId: number, userId: number, role: string) {
+    this.clearRingTimeout(callId);
+
     const calls = await this.db.query<any[]>(
       `SELECT * FROM calls WHERE id = ? AND status = 'ringing'`,
       [callId],
@@ -194,6 +237,8 @@ export class CallsService {
 
   /** End call — always deduct from caller_id (male), host (female) earns */
   async end(callId: number, userId: number) {
+    this.clearRingTimeout(callId);
+
     const calls = await this.db.query<any[]>(
       `SELECT * FROM calls WHERE id = ? AND status = 'active'`,
       [callId],
@@ -338,18 +383,68 @@ export class CallsService {
   async getHistory(userId: number, role: string, page = 1, limit = 20) {
     const offset = (page - 1) * limit;
     const isHost = role === 'female';
-    const column = isHost ? 'host_id' : 'caller_id';
-    const joinColumn = isHost ? 'caller_id' : 'host_id';
+    const partnerCol = isHost ? 'caller_id' : 'host_id';
+    const selfCol = isHost ? 'host_id' : 'caller_id';
 
     const logs = await this.db.query(
-      `SELECT cl.*, u.name as partner_name, u.avatar_url as partner_avatar
-       FROM call_logs cl
-       JOIN users u ON u.id = cl.${joinColumn}
-       WHERE cl.${column} = ?
-       ORDER BY cl.created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT c.id as call_id, c.status, c.duration_seconds, c.amount_deducted, c.host_earning,
+              c.created_at, c.started_at, c.ended_at, c.initiated_by, c.rate_per_minute,
+              u.name as partner_name, u.avatar_url as partner_avatar
+       FROM calls c
+       JOIN users u ON u.id = c.${partnerCol}
+       WHERE c.${selfCol} = ?
+       ORDER BY c.created_at DESC
+       LIMIT ? OFFSET ?`,
       [userId, limit, offset],
     );
     return { success: true, data: logs };
+  }
+
+  private scheduleMissedCallTimeout(
+    callId: number,
+    callerId: number,
+    hostId: number,
+    initiatedBy: 'male' | 'female',
+  ) {
+    this.clearRingTimeout(callId);
+
+    const timeout = setTimeout(async () => {
+      this.ringTimeouts.delete(callId);
+      try {
+        const rows = await this.db.query<any[]>(
+          `SELECT status FROM calls WHERE id = ?`,
+          [callId],
+        );
+        if (!rows.length || rows[0].status !== 'ringing') return;
+
+        await this.db.query(
+          `UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`,
+          [callId],
+        );
+
+        const initiatorId = initiatedBy === 'male' ? callerId : hostId;
+        const receiverId = initiatedBy === 'male' ? hostId : callerId;
+
+        this.socket.notifyUser(initiatorId, 'call_missed', {
+          call_id: callId,
+          reason: 'no_answer',
+        });
+        this.socket.notifyUser(receiverId, 'call_missed', {
+          call_id: callId,
+          reason: 'missed',
+        });
+      } catch (err) {
+        this.logger.warn(`missed call timeout failed for #${callId}: ${(err as Error)?.message}`);
+      }
+    }, RING_TIMEOUT_MS);
+
+    this.ringTimeouts.set(callId, timeout);
+  }
+
+  private clearRingTimeout(callId: number) {
+    const existing = this.ringTimeouts.get(callId);
+    if (existing) clearTimeout(existing);
+    this.ringTimeouts.delete(callId);
   }
 
   private createRoomId(): string {
@@ -365,9 +460,11 @@ export class CallsService {
     hostLevel: number;
     initiatedBy: 'male' | 'female';
     hostName?: string;
+    hostAvatarUrl?: string;
     callerName?: string;
+    callerAvatarUrl?: string;
   }) {
-    const base = {
+    return {
       call_id: params.callId,
       caller_id: params.callerId,
       host_id: params.hostId,
@@ -376,16 +473,12 @@ export class CallsService {
       rate_per_minute: params.ratePerMinute,
       host_level: params.hostLevel,
       initiated_by: params.initiatedBy,
+      host_name: params.hostName ?? null,
+      host_avatar_url: params.hostAvatarUrl ?? null,
+      caller_name: params.callerName ?? null,
+      caller_avatar_url: params.callerAvatarUrl ?? null,
       ...this.zegoToken.publicAppConfig(),
     };
-
-    if (params.hostName) {
-      return { ...base, host_name: params.hostName };
-    }
-    if (params.callerName) {
-      return { ...base, caller_name: params.callerName };
-    }
-    return base;
   }
 
   private safeGenerateToken(userId: number, roomId: string): string | null {
