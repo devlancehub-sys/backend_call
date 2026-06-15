@@ -34,6 +34,8 @@ export class CallsService {
 
   /** Boy calls girl — money always deducted from boy (caller_id) */
   async initiate(callerId: number, hostId: number) {
+    this.ensureZegoConfigured();
+
     if (!this.socket.isUserOnline(hostId)) {
       throw new BadRequestException('User is offline');
     }
@@ -96,6 +98,8 @@ export class CallsService {
 
   /** Girl calls boy — still deducts from boy's wallet only */
   async initiateFromHost(hostId: number, callerId: number) {
+    this.ensureZegoConfigured();
+
     if (!this.socket.isUserOnline(callerId)) {
       throw new BadRequestException('User is offline');
     }
@@ -175,14 +179,27 @@ export class CallsService {
       throw new ForbiddenException('Only the user can accept this call');
     }
 
-    await this.db.query(`UPDATE calls SET status = 'active', started_at = NOW() WHERE id = ?`, [
-      callId,
-    ]);
+    if (!this.zegoToken.isConfigured()) {
+      this.logger.error(
+        'ZEGOCLOUD not configured — set ZEGOCLOUD_APP_ID and ZEGOCLOUD_SERVER_SECRET (32 chars)',
+      );
+      throw new BadRequestException(
+        'Voice calls are unavailable. ZEGOCLOUD is not configured on the server.',
+      );
+    }
 
     const roomId = call.agora_channel;
     const notifyId = initiatedBy === 'male' ? call.caller_id : call.host_id;
-    const accepterToken = this.safeGenerateToken(userId, roomId);
-    const peerToken = this.safeGenerateToken(notifyId, roomId);
+
+    const accepterToken = this.zegoToken.generateRoomToken(userId, roomId);
+    const peerToken = this.zegoToken.generateRoomToken(notifyId, roomId);
+    if (!accepterToken || !peerToken) {
+      throw new BadRequestException('Voice call could not start. ZEGOCLOUD token error.');
+    }
+
+    await this.db.query(`UPDATE calls SET status = 'active', started_at = NOW() WHERE id = ?`, [
+      callId,
+    ]);
 
     this.socket.notifyUser(notifyId, 'call_accepted', {
       call_id: callId,
@@ -479,6 +496,15 @@ export class CallsService {
       caller_avatar_url: params.callerAvatarUrl ?? null,
       ...this.zegoToken.publicAppConfig(),
     };
+  }
+
+  private ensureZegoConfigured(): void {
+    if (!this.zegoToken.isConfigured()) {
+      this.logger.warn('Call blocked — ZEGOCLOUD_APP_ID / ZEGOCLOUD_SERVER_SECRET missing');
+      throw new BadRequestException(
+        'Voice calls are unavailable. ZEGOCLOUD is not configured on the server.',
+      );
+    }
   }
 
   private safeGenerateToken(userId: number, roomId: string): string | null {
