@@ -1,20 +1,20 @@
 import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as mysql from 'mysql2/promise';
+import { resolveDbConfig } from './db-config';
+import { applySchemaSql } from './schema-bootstrap';
 
 @Injectable()
 export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
   private pool: mysql.Pool;
+  private dbConfig: ReturnType<typeof resolveDbConfig>;
 
   constructor(private config: ConfigService) {}
 
   async onModuleInit() {
-    const host = process.env.DB_HOST || this.config.get('DB_HOST', 'localhost');
-    const port = Number(process.env.DB_PORT || this.config.get('DB_PORT', 3306));
-    const user = process.env.DB_USER || this.config.get('DB_USER', 'root');
-    const password = process.env.DB_PASSWORD ?? this.config.get('DB_PASSWORD', '');
-    const database = process.env.DB_NAME || this.config.get('DB_NAME', 'love_call');
+    this.dbConfig = resolveDbConfig(this.config);
+    const { host, port, user, password, database } = this.dbConfig;
 
     this.pool = mysql.createPool({
       host,
@@ -31,6 +31,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       await conn.ping();
       conn.release();
       this.logger.log(`Connected to MySQL (${user}@${host}:${port}/${database})`);
+      await this.bootstrapSchemaIfNeeded();
       await this.ensureSchema();
     } catch (error: any) {
       if (error?.code === 'ER_ACCESS_DENIED_ERROR') {
@@ -38,9 +39,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
           'MySQL access denied. Set DB_PASSWORD in backend/.env to your MySQL root password.',
         );
         this.logger.error('Example: DB_PASSWORD=your_mysql_password');
-        this.logger.error('Or run: docker compose up -d  (uses password: lovecall123)');
       } else if (error?.code === 'ER_BAD_DB_ERROR') {
-        this.logger.error(`Database "${database}" does not exist. Run: mysql -u root -p < database/schema.sql`);
+        this.logger.error(`Database "${database}" does not exist. Run: npm run db:setup`);
       } else {
         this.logger.error(`MySQL connection failed: ${error?.message || error}`);
       }
@@ -79,10 +79,35 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     return rows.length > 0;
   }
 
+  /** Run schema.sql when core tables are missing (e.g. fresh Railway database). */
+  private async bootstrapSchemaIfNeeded() {
+    const required = ['users', 'languages', 'wallets', 'refresh_tokens', 'calls'];
+    const missing: string[] = [];
+
+    for (const table of required) {
+      if (!(await this.hasTable(table))) {
+        missing.push(table);
+      }
+    }
+
+    if (!missing.length) {
+      return;
+    }
+
+    this.logger.warn(`Missing tables: ${missing.join(', ')} — applying database/schema.sql`);
+    try {
+      await applySchemaSql(this.dbConfig);
+      this.logger.log('Database schema bootstrap complete');
+    } catch (error: any) {
+      this.logger.error(`Schema bootstrap failed: ${error?.message || error}`);
+      throw error;
+    }
+  }
+
   /** Apply safe migrations for older production databases. */
   private async ensureSchema() {
     if (!(await this.hasTable('users'))) {
-      this.logger.warn('users table missing — run database/schema.sql on this database');
+      this.logger.warn('users table still missing after bootstrap');
       return;
     }
 

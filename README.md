@@ -8,7 +8,7 @@ NestJS API for the Love Call voice platform.
 cd backend
 npm install
 cp .env.example .env   # edit DB + JWT + Zego credentials
-npm run db:setup       # creates MySQL schema
+npm run db:setup       # applies database/schema.sql (also runs on start:prod)
 npm run start:dev      # http://localhost:3000/api
 ```
 
