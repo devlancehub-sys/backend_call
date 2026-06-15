@@ -141,6 +141,36 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Added users.last_seen_at column');
     }
 
+    if (!(await this.hasColumn('users', 'email'))) {
+      await this.query('ALTER TABLE users ADD COLUMN email VARCHAR(100) NULL');
+      this.logger.log('Added users.email column');
+    }
+
+    if (await this.hasTable('wallet_transactions')) {
+      if (!(await this.hasColumn('wallet_transactions', 'payment_gateway'))) {
+        await this.query('ALTER TABLE wallet_transactions ADD COLUMN payment_gateway VARCHAR(50) NULL');
+        this.logger.log('Added wallet_transactions.payment_gateway column');
+      }
+      if (!(await this.hasColumn('wallet_transactions', 'payment_id'))) {
+        await this.query('ALTER TABLE wallet_transactions ADD COLUMN payment_id VARCHAR(100) NULL');
+        this.logger.log('Added wallet_transactions.payment_id column');
+      }
+    }
+
+    if (await this.hasTable('withdraw_requests')) {
+      if (!(await this.hasColumn('withdraw_requests', 'method'))) {
+        await this.query(
+          "ALTER TABLE withdraw_requests ADD COLUMN method VARCHAR(50) NOT NULL DEFAULT 'upi'",
+        );
+        this.logger.log('Added withdraw_requests.method column');
+      }
+      if (!(await this.hasColumn('withdraw_requests', 'account_details'))) {
+        await this.query('ALTER TABLE withdraw_requests ADD COLUMN account_details JSON NULL');
+        this.logger.log('Added withdraw_requests.account_details column');
+      }
+      await this.ensureWithdrawStatusEnum();
+    }
+
     if (!(await this.hasTable('wallets'))) {
       await this.query(`
         CREATE TABLE wallets (
@@ -169,6 +199,22 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         )
       `);
       this.logger.log('Created refresh_tokens table');
+    }
+  }
+
+  /** Ensure withdraw status enum includes `processing` (used by withdraw queries). */
+  private async ensureWithdrawStatusEnum() {
+    const rows = await this.query<any[]>(
+      `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'withdraw_requests' AND COLUMN_NAME = 'status'`,
+    );
+    const columnType = rows[0]?.COLUMN_TYPE as string | undefined;
+    if (columnType && !columnType.includes('processing')) {
+      await this.query(
+        `ALTER TABLE withdraw_requests MODIFY status
+         ENUM('pending','processing','completed','rejected') NOT NULL DEFAULT 'pending'`,
+      );
+      this.logger.log('Updated withdraw_requests.status enum');
     }
   }
 }

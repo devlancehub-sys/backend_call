@@ -5,6 +5,7 @@ import {
   OnGatewayDisconnect,
   SubscribeMessage,
 } from '@nestjs/websockets';
+import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -12,6 +13,8 @@ import { DatabaseService } from '../database/database.service';
 
 @WebSocketGateway({ cors: { origin: '*' } })
 export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(SocketGateway.name);
+
   @WebSocketServer()
   server: Server;
 
@@ -33,7 +36,13 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.data.userRole = payload.role;
       this.onlineUsers.set(payload.id, client.id);
 
-      await this.db.query('UPDATE users SET is_online = 1, last_seen_at = NOW() WHERE id = ?', [payload.id]);
+      try {
+        await this.db.query('UPDATE users SET is_online = 1, last_seen_at = NOW() WHERE id = ?', [
+          payload.id,
+        ]);
+      } catch (err) {
+        this.logger.warn(`Could not mark user ${payload.id} online: ${(err as Error)?.message || err}`);
+      }
 
       if (payload.role === 'female') {
         this.server.emit('host_online', { host_id: payload.id });
@@ -51,7 +60,11 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!userId) return;
 
     this.onlineUsers.delete(userId);
-    await this.db.query('UPDATE users SET is_online = 0, last_seen_at = NOW() WHERE id = ?', [userId]);
+    try {
+      await this.db.query('UPDATE users SET is_online = 0, last_seen_at = NOW() WHERE id = ?', [userId]);
+    } catch (err) {
+      this.logger.warn(`Could not mark user ${userId} offline: ${(err as Error)?.message || err}`);
+    }
 
     if (role === 'female') {
       this.server.emit('host_offline', { host_id: userId });
