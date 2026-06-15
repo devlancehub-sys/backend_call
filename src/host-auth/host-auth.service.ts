@@ -1,7 +1,12 @@
-import { ConflictException, Injectable, InternalServerErrorException, Logger, UnauthorizedException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { AuthService } from '../auth/auth.service';
 import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { CreateHostDto, HostLoginDto } from './dto/host-auth.dto';
@@ -12,8 +17,7 @@ export class HostAuthService {
 
   constructor(
     private db: DatabaseService,
-    private jwt: JwtService,
-    private config: ConfigService,
+    private auth: AuthService,
     private platformSettings: PlatformSettingsService,
   ) {}
 
@@ -43,7 +47,11 @@ export class HostAuthService {
         ]);
       }
 
-      const tokens = this.generateTokens(user);
+      const tokens = this.auth.generateTokens({
+        id: user.id,
+        phone: user.phone ?? `host_${user.id}`,
+        role: user.role,
+      });
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
       await this.db.query(
@@ -81,9 +89,7 @@ export class HostAuthService {
       throw new ConflictException('Username already exists');
     }
 
-    const phone =
-      dto.phone?.trim() ||
-      `9${Date.now().toString().slice(-9)}`;
+    const phone = dto.phone?.trim() || `9${Date.now().toString().slice(-9)}`;
 
     const phoneCheck = await this.db.query<any[]>(
       'SELECT id FROM users WHERE phone = ?',
@@ -128,22 +134,5 @@ export class HostAuthService {
     } finally {
       conn.release();
     }
-  }
-
-  private generateTokens(user: { id: number; phone?: string | null; role: string }) {
-    const payload = {
-      id: user.id,
-      phone: user.phone ?? `host_${user.id}`,
-      role: user.role,
-    };
-    const accessToken = this.jwt.sign(payload, {
-      secret: this.config.get('JWT_SECRET'),
-      expiresIn: this.config.get('JWT_EXPIRES_IN', '15m'),
-    });
-    const refreshToken = this.jwt.sign(payload, {
-      secret: this.config.get('JWT_REFRESH_SECRET'),
-      expiresIn: this.config.get('JWT_REFRESH_EXPIRES_IN', '7d'),
-    });
-    return { accessToken, refreshToken };
   }
 }
