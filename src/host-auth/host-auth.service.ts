@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -8,6 +8,8 @@ import { CreateHostDto, HostLoginDto } from './dto/host-auth.dto';
 
 @Injectable()
 export class HostAuthService {
+  private readonly logger = new Logger(HostAuthService.name);
+
   constructor(
     private db: DatabaseService,
     private jwt: JwtService,
@@ -16,51 +18,57 @@ export class HostAuthService {
   ) {}
 
   async login(dto: HostLoginDto) {
-    const rows = await this.db.query<any[]>(
-      `SELECT u.* FROM users u
-       WHERE u.username = ? AND u.role = 'female' AND u.is_active = 1`,
-      [dto.username.trim().toLowerCase()],
-    );
+    try {
+      const rows = await this.db.query<any[]>(
+        `SELECT u.* FROM users u
+         WHERE u.username = ? AND u.role = 'female' AND u.is_active = 1`,
+        [dto.username.trim().toLowerCase()],
+      );
 
-    if (!rows.length || !rows[0].password_hash) {
-      throw new UnauthorizedException('Invalid username or password');
-    }
+      if (!rows.length || !rows[0].password_hash) {
+        throw new UnauthorizedException('Invalid username or password');
+      }
 
-    const user = rows[0];
-    const valid = await bcrypt.compare(dto.password, user.password_hash);
-    if (!valid) {
-      throw new UnauthorizedException('Invalid username or password');
-    }
+      const user = rows[0];
+      const valid = await bcrypt.compare(dto.password, user.password_hash);
+      if (!valid) {
+        throw new UnauthorizedException('Invalid username or password');
+      }
 
-    if (dto.device_id || dto.fcm_token) {
-      await this.db.query('UPDATE users SET device_id = ?, fcm_token = ? WHERE id = ?', [
-        dto.device_id || user.device_id,
-        dto.fcm_token || user.fcm_token,
-        user.id,
-      ]);
-    }
+      if (dto.device_id || dto.fcm_token) {
+        await this.db.query('UPDATE users SET device_id = ?, fcm_token = ? WHERE id = ?', [
+          dto.device_id || user.device_id,
+          dto.fcm_token || user.fcm_token,
+          user.id,
+        ]);
+      }
 
-    const tokens = this.generateTokens(user);
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const tokens = this.generateTokens(user);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-    await this.db.query(
-      'INSERT INTO refresh_tokens (user_id, token, device_id, expires_at) VALUES (?, ?, ?, ?)',
-      [user.id, tokens.refreshToken, dto.device_id || null, expiresAt],
-    );
+      await this.db.query(
+        'INSERT INTO refresh_tokens (user_id, token, device_id, expires_at) VALUES (?, ?, ?, ?)',
+        [user.id, tokens.refreshToken, dto.device_id || null, expiresAt],
+      );
 
-    return {
-      success: true,
-      data: {
-        user: {
-          id: user.id,
-          phone: user.phone,
-          role: user.role,
-          name: user.name,
-          username: user.username,
+      return {
+        success: true,
+        data: {
+          user: {
+            id: user.id,
+            phone: user.phone,
+            role: user.role,
+            name: user.name,
+            username: user.username,
+          },
+          ...tokens,
         },
-        ...tokens,
-      },
-    };
+      };
+    } catch (err) {
+      if (err instanceof UnauthorizedException) throw err;
+      this.logger.error(`host login failed: ${(err as Error)?.message || err}`);
+      throw new InternalServerErrorException('Host login failed. Please try again.');
+    }
   }
 
   async createHost(dto: CreateHostDto) {
@@ -122,8 +130,12 @@ export class HostAuthService {
     }
   }
 
-  private generateTokens(user: { id: number; phone: string; role: string }) {
-    const payload = { id: user.id, phone: user.phone, role: user.role };
+  private generateTokens(user: { id: number; phone?: string | null; role: string }) {
+    const payload = {
+      id: user.id,
+      phone: user.phone ?? `host_${user.id}`,
+      role: user.role,
+    };
     const accessToken = this.jwt.sign(payload, {
       secret: this.config.get('JWT_SECRET'),
       expiresIn: this.config.get('JWT_EXPIRES_IN', '15m'),
