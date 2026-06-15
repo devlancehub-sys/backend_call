@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
   about           TEXT          NULL,
   is_online       TINYINT(1)    NOT NULL DEFAULT 0,
   is_active       TINYINT(1)    NOT NULL DEFAULT 1,
+  last_seen_at    DATETIME      NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

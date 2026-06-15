@@ -136,6 +136,11 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Added users.password_hash column');
     }
 
+    if (!(await this.hasColumn('users', 'last_seen_at'))) {
+      await this.query('ALTER TABLE users ADD COLUMN last_seen_at DATETIME NULL');
+      this.logger.log('Added users.last_seen_at column');
+    }
+
     if (!(await this.hasTable('wallets'))) {
       await this.query(`
         CREATE TABLE wallets (
