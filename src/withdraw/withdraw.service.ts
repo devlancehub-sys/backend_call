@@ -1,12 +1,22 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 
 @Injectable()
 export class WithdrawService {
+  private readonly logger = new Logger(WithdrawService.name);
+
   constructor(private db: DatabaseService) {}
 
   async request(hostId: number, amount: number, method: string, accountDetails: any) {
-    if (amount < 100) throw new BadRequestException('Minimum withdraw is ₹100');
+    const normalizedAmount = Math.round(Number(amount));
+    if (!Number.isFinite(normalizedAmount) || normalizedAmount < 100) {
+      throw new BadRequestException('Minimum withdraw is ₹100');
+    }
 
     const [total] = await this.db.query<any[]>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM earnings WHERE host_id = ?`,
@@ -19,14 +29,21 @@ export class WithdrawService {
     );
 
     const available = parseFloat(total[0].total) - parseFloat(withdrawn[0].total);
-    if (amount > available) throw new BadRequestException('Insufficient withdraw balance');
+    if (normalizedAmount > available) {
+      throw new BadRequestException('Insufficient withdraw balance');
+    }
 
-    const result = await this.db.query<any>(
-      `INSERT INTO withdraw_requests (host_id, amount, method, account_details) VALUES (?, ?, ?, ?)`,
-      [hostId, amount, method, JSON.stringify(accountDetails)],
-    );
+    try {
+      const result = await this.db.query<any>(
+        `INSERT INTO withdraw_requests (host_id, amount, method, account_details) VALUES (?, ?, ?, ?)`,
+        [hostId, normalizedAmount, method, JSON.stringify(accountDetails ?? {})],
+      );
 
-    return { success: true, data: { id: result.insertId, status: 'pending' } };
+      return { success: true, data: { id: result.insertId, status: 'pending' } };
+    } catch (err) {
+      this.logger.error(`withdraw request failed: ${(err as Error)?.message || err}`);
+      throw new InternalServerErrorException('Withdraw request failed. Please try again.');
+    }
   }
 
   async getHistory(hostId: number) {

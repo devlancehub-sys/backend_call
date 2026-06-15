@@ -38,9 +38,10 @@ export class HostsService {
 
   async getOnline() {
     const hosts = await this.db.query(
-      `SELECT u.id, u.name, u.age, u.avatar_url, fh.rate_per_minute, fh.rating, fh.total_calls
+      `SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
+              fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.role = 'female' AND u.is_online = 1
+       WHERE u.role = 'female' AND u.is_active = 1 AND u.is_online = 1
        ORDER BY fh.rating DESC LIMIT 20`,
     );
     return { success: true, data: hosts.map((h: any) => enrichHostRates(h)) };

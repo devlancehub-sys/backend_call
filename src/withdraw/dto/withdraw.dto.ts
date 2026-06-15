@@ -1,10 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsObject, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsNumber, IsObject, IsString, Min } from 'class-validator';
 
 export class WithdrawRequestDto {
   @ApiProperty({ example: 1000 })
-  @IsInt()
-  @Min(1)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(100)
   amount: number;
 
   @ApiProperty({ example: 'upi' })

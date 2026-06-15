@@ -27,7 +27,7 @@ export class EarningsService {
     );
     const [withdrawn] = await this.db.query<any[]>(
       `SELECT COALESCE(SUM(amount), 0) as withdrawn FROM withdraw_requests
-       WHERE host_id = ? AND status = 'completed'`,
+       WHERE host_id = ? AND status IN ('pending', 'processing', 'completed')`,
       [hostId],
     );
 
