@@ -41,44 +41,40 @@ export class EarningsService {
 
   async getSummary(hostId: number) {
     try {
-      const todayRows = await this.db.query<any[]>(
-        `SELECT COALESCE(SUM(amount), 0) as today_earnings FROM earnings
-         WHERE host_id = ? AND DATE(created_at) = CURDATE()`,
-        [hostId],
-      );
-      const weekRows = await this.db.query<any[]>(
-        `SELECT COALESCE(SUM(amount), 0) as weekly_earnings FROM earnings
-         WHERE host_id = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)`,
-        [hostId],
-      );
-      const monthRows = await this.db.query<any[]>(
-        `SELECT COALESCE(SUM(amount), 0) as monthly_earnings FROM earnings
-         WHERE host_id = ? AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)`,
-        [hostId],
-      );
-      const totalRows = await this.db.query<any[]>(
-        `SELECT COALESCE(SUM(amount), 0) as total_earnings FROM earnings WHERE host_id = ?`,
-        [hostId],
-      );
-      const withdrawnRows = await this.db.query<any[]>(
-        `SELECT COALESCE(SUM(amount), 0) as withdrawn FROM withdraw_requests
-         WHERE host_id = ? AND status IN ('pending', 'processing', 'completed')`,
-        [hostId],
-      );
+      const [summaryRows, withdrawnRows] = await Promise.all([
+        this.db.query<any[]>(
+          `SELECT
+             COALESCE(SUM(CASE
+               WHEN created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY
+               THEN amount ELSE 0 END), 0) AS today_earnings,
+             COALESCE(SUM(CASE
+               WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+               THEN amount ELSE 0 END), 0) AS weekly_earnings,
+             COALESCE(SUM(CASE
+               WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+               THEN amount ELSE 0 END), 0) AS monthly_earnings,
+             COALESCE(SUM(amount), 0) AS total_earnings
+           FROM earnings
+           WHERE host_id = ?`,
+          [hostId],
+        ),
+        this.db.query<any[]>(
+          `SELECT COALESCE(SUM(amount), 0) as withdrawn FROM withdraw_requests
+           WHERE host_id = ? AND status IN ('pending', 'processing', 'completed')`,
+          [hostId],
+        ),
+      ]);
 
-      const todayRow = this.firstRow(todayRows);
-      const weekRow = this.firstRow(weekRows);
-      const monthRow = this.firstRow(monthRows);
-      const totalRow = this.firstRow(totalRows);
+      const summaryRow = this.firstRow(summaryRows);
       const withdrawnRow = this.firstRow(withdrawnRows);
 
-      const totalEarnings = this.toAmount(totalRow?.total_earnings);
+      const totalEarnings = this.toAmount(summaryRow?.total_earnings);
       const withdrawnAmount = this.toAmount(withdrawnRow?.withdrawn);
 
       const data: EarningsSummaryData = {
-        today_earnings: this.toAmount(todayRow?.today_earnings),
-        weekly_earnings: this.toAmount(weekRow?.weekly_earnings),
-        monthly_earnings: this.toAmount(monthRow?.monthly_earnings),
+        today_earnings: this.toAmount(summaryRow?.today_earnings),
+        weekly_earnings: this.toAmount(summaryRow?.weekly_earnings),
+        monthly_earnings: this.toAmount(summaryRow?.monthly_earnings),
         total_earnings: totalEarnings,
         withdraw_balance: Math.max(0, totalEarnings - withdrawnAmount),
       };

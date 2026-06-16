@@ -6,26 +6,32 @@ export class CallersService {
   constructor(private db: DatabaseService) {}
 
   /** Male users list — for girls app (larka list) */
-  async browse() {
+  async browse(limit = 50) {
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 100) : 50;
     const callers = await this.db.query(
       `SELECT u.id, u.name, u.phone, u.avatar_url, u.age, u.about, u.is_online,
               COALESCE(w.balance, 0) as wallet_balance
        FROM users u
        LEFT JOIN wallets w ON w.user_id = u.id
        WHERE u.role = 'male' AND u.is_active = 1
-       ORDER BY u.is_online DESC, u.name ASC`,
+       ORDER BY u.is_online DESC, u.name ASC
+       LIMIT ?`,
+      [safeLimit],
     );
     return { success: true, data: callers.map(this.formatCaller) };
   }
 
-  async getOnline() {
+  async getOnline(limit = 50) {
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 100) : 50;
     const callers = await this.db.query(
       `SELECT u.id, u.name, u.phone, u.avatar_url, u.age, u.about, u.is_online,
               COALESCE(w.balance, 0) as wallet_balance
        FROM users u
        LEFT JOIN wallets w ON w.user_id = u.id
        WHERE u.role = 'male' AND u.is_active = 1 AND u.is_online = 1
-       ORDER BY u.name ASC`,
+       ORDER BY u.name ASC
+       LIMIT ?`,
+      [safeLimit],
     );
     return { success: true, data: callers.map(this.formatCaller) };
   }

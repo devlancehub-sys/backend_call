@@ -10,16 +10,7 @@ export class AppController {
   @Get('health')
   @ApiOperation({ summary: 'Health check — API and database status' })
   async health() {
-    let database = 'ok';
-
-    try {
-      const pool = this.db.getPool();
-      const conn = await pool.getConnection();
-      await conn.ping();
-      conn.release();
-    } catch {
-      database = 'error';
-    }
+    const database = (await this.db.ping()) ? 'ok' : 'error';
 
     if (database !== 'ok') {
       throw new ServiceUnavailableException({

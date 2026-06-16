@@ -16,14 +16,24 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.dbConfig = resolveDbConfig(this.config);
     const { host, port, user, password, database } = this.dbConfig;
 
+    const connectionLimit = Number(this.config.get('DB_POOL_SIZE')) || 5;
+
     this.pool = mysql.createPool({
       host,
       port,
       user,
       password,
       database,
+      charset: 'utf8mb4',
+      timezone: '+00:00',
       waitForConnections: true,
-      connectionLimit: 10,
+      connectionLimit,
+      queueLimit: 20,
+      maxIdle: connectionLimit,
+      idleTimeout: 60_000,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 10_000,
+      connectTimeout: 10_000,
     });
 
     try {
@@ -54,6 +64,15 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   getPool() {
     return this.pool;
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      await this.query('SELECT 1');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async query<T = any>(sql: string, params?: any[]): Promise<T> {
@@ -200,6 +219,71 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       `);
       this.logger.log('Created refresh_tokens table');
     }
+
+    await this.ensurePerformanceIndexes();
+  }
+
+  /** Add composite indexes for hot query paths (idempotent). */
+  private async ensurePerformanceIndexes() {
+    const indexes: Array<{ table: string; name: string; sql: string }> = [
+      {
+        table: 'calls',
+        name: 'idx_calls_host_created',
+        sql: 'CREATE INDEX idx_calls_host_created ON calls (host_id, created_at)',
+      },
+      {
+        table: 'calls',
+        name: 'idx_calls_caller_created',
+        sql: 'CREATE INDEX idx_calls_caller_created ON calls (caller_id, created_at)',
+      },
+      {
+        table: 'calls',
+        name: 'idx_calls_status',
+        sql: 'CREATE INDEX idx_calls_status ON calls (status, created_at)',
+      },
+      {
+        table: 'earnings',
+        name: 'idx_earnings_host_created',
+        sql: 'CREATE INDEX idx_earnings_host_created ON earnings (host_id, created_at)',
+      },
+      {
+        table: 'withdraw_requests',
+        name: 'idx_wr_host_status',
+        sql: 'CREATE INDEX idx_wr_host_status ON withdraw_requests (host_id, status)',
+      },
+      {
+        table: 'users',
+        name: 'idx_users_role_active_online',
+        sql: 'CREATE INDEX idx_users_role_active_online ON users (role, is_active, is_online)',
+      },
+      {
+        table: 'users',
+        name: 'idx_users_device_role',
+        sql: 'CREATE INDEX idx_users_device_role ON users (device_id, role)',
+      },
+    ];
+
+    for (const idx of indexes) {
+      if (!(await this.hasTable(idx.table))) continue;
+      if (await this.hasIndex(idx.table, idx.name)) continue;
+      try {
+        await this.query(idx.sql);
+        this.logger.log(`Added index ${idx.name}`);
+      } catch (error: any) {
+        if (error?.code !== 'ER_DUP_KEYNAME') {
+          this.logger.warn(`Index ${idx.name} skipped: ${error?.message || error}`);
+        }
+      }
+    }
+  }
+
+  private async hasIndex(table: string, indexName: string): Promise<boolean> {
+    const rows = await this.query<any[]>(
+      `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?`,
+      [table, indexName],
+    );
+    return rows.length > 0;
   }
 
   /** Ensure withdraw status enum includes `processing` (used by withdraw queries). */

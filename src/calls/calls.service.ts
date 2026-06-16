@@ -398,7 +398,9 @@ export class CallsService {
   }
 
   async getHistory(userId: number, role: string, page = 1, limit = 20) {
-    const offset = (page - 1) * limit;
+    const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+    const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 100) : 20;
+    const offset = (safePage - 1) * safeLimit;
     const isHost = role === 'female';
     const partnerCol = isHost ? 'caller_id' : 'host_id';
     const selfCol = isHost ? 'host_id' : 'caller_id';
@@ -412,7 +414,7 @@ export class CallsService {
        WHERE c.${selfCol} = ?
        ORDER BY c.created_at DESC
        LIMIT ? OFFSET ?`,
-      [userId, limit, offset],
+      [userId, safeLimit, offset],
     );
     return { success: true, data: logs };
   }
