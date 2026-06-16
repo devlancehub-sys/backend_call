@@ -18,17 +18,18 @@ export class WithdrawService {
       throw new BadRequestException('Minimum withdraw is ₹100');
     }
 
-    const [total] = await this.db.query<any[]>(
+    const [totalRow] = await this.db.query<any[]>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM earnings WHERE host_id = ?`,
       [hostId],
     );
-    const [withdrawn] = await this.db.query<any[]>(
+    const [withdrawnRow] = await this.db.query<any[]>(
       `SELECT COALESCE(SUM(amount), 0) as total FROM withdraw_requests
        WHERE host_id = ? AND status IN ('pending', 'processing', 'completed')`,
       [hostId],
     );
 
-    const available = parseFloat(total[0].total) - parseFloat(withdrawn[0].total);
+    const available =
+      parseFloat(totalRow?.total ?? 0) - parseFloat(withdrawnRow?.total ?? 0);
     if (normalizedAmount > available) {
       throw new BadRequestException('Insufficient withdraw balance');
     }
