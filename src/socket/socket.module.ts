@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SocketGateway } from './socket.gateway';
+import { OnlineUserManagerService } from './online-user-manager.service';
 
 @Module({
   imports: [
@@ -13,7 +14,7 @@ import { SocketGateway } from './socket.gateway';
       }),
     }),
   ],
-  providers: [SocketGateway],
-  exports: [SocketGateway],
+  providers: [OnlineUserManagerService, SocketGateway],
+  exports: [SocketGateway, OnlineUserManagerService],
 })
 export class SocketModule {}

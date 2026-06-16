@@ -1,5 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class WalletService {
@@ -7,8 +8,8 @@ export class WalletService {
 
   async getBalance(userId: number) {
     const wallets = await this.db.query<any[]>(
-      'SELECT balance, currency FROM wallets WHERE user_id = ?',
-      [userId],
+      'SELECT balance, currency FROM wallets WHERE user_id = ? AND status = ?',
+      [userId, RECORD_STATUS.ACTIVE],
     );
     return { success: true, data: wallets[0] || { balance: 0, currency: 'INR' } };
   }
@@ -32,8 +33,8 @@ export class WalletService {
     const orderId = `order_${Date.now()}`;
     await this.db.query(
       `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, payment_gateway, payment_id, status, description)
-       SELECT ?, 'recharge', ?, balance, ?, ?, 'pending', ? FROM wallets WHERE user_id = ?`,
-      [userId, amount, gateway, orderId, `Recharge ₹${amount}`, userId],
+       SELECT ?, 'recharge', ?, balance, ?, ?, 'pending', ? FROM wallets WHERE user_id = ? AND status = ?`,
+      [userId, amount, gateway, orderId, `Recharge ₹${amount}`, userId, RECORD_STATUS.ACTIVE],
     );
 
     return { success: true, data: { order_id: orderId, amount, gateway } };
@@ -45,8 +46,8 @@ export class WalletService {
     try {
       await conn.beginTransaction();
       const [wallets] = await conn.query<any[]>(
-        'SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE',
-        [userId],
+        'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
+        [userId, RECORD_STATUS.ACTIVE],
       );
       const newBalance = parseFloat(wallets[0].balance) + amount;
 

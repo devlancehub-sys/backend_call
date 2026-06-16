@@ -2,7 +2,7 @@ import { Controller, Get, Put, Body, Param, Query, UseGuards } from '@nestjs/com
 import { ApiOperation, ApiParam, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { AdminApiKeyGuard } from '../common/guards/admin-api-key.guard';
-import { UpdateSettingsDto } from './dto/admin.dto';
+import { UpdateSettingsDto, UpdateUserStatusDto } from './dto/admin.dto';
 
 @ApiTags('Admin')
 @ApiSecurity('admin-key')
@@ -59,5 +59,12 @@ export class AdminController {
   @ApiOperation({ summary: 'Update platform settings' })
   updateSettings(@Body() body: UpdateSettingsDto) {
     return this.adminService.updateSettings(body.settings);
+  }
+
+  @Put('users/:id/status')
+  @ApiOperation({ summary: 'Set user status — inactive | active | disabled' })
+  @ApiParam({ name: 'id', example: 12 })
+  updateUserStatus(@Param('id') id: string, @Body() body: UpdateUserStatusDto) {
+    return this.adminService.updateUserStatus(+id, body.status);
   }
 }

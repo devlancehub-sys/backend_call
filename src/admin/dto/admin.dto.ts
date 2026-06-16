@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsObject } from 'class-validator';
+import { IsIn, IsObject } from 'class-validator';
+import { RECORD_STATUS } from '../../common/constants/record-status';
 
 export class UpdateSettingsDto {
   @ApiProperty({
@@ -9,4 +10,10 @@ export class UpdateSettingsDto {
   })
   @IsObject()
   settings: Record<string, string>;
+}
+
+export class UpdateUserStatusDto {
+  @ApiProperty({ enum: ['inactive', 'active', 'disabled'], example: 'active' })
+  @IsIn([RECORD_STATUS.INACTIVE, RECORD_STATUS.ACTIVE, RECORD_STATUS.DISABLED])
+  status: 'inactive' | 'active' | 'disabled';
 }

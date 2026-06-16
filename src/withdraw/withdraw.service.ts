@@ -5,6 +5,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class WithdrawService {
@@ -20,10 +21,10 @@ export class WithdrawService {
 
     const [balanceRow] = await this.db.query<any[]>(
       `SELECT
-         COALESCE((SELECT SUM(amount) FROM earnings WHERE host_id = ?), 0) AS total,
+         COALESCE((SELECT SUM(amount) FROM earnings WHERE host_id = ? AND status = ?), 0) AS total,
          COALESCE((SELECT SUM(amount) FROM withdraw_requests
            WHERE host_id = ? AND status IN ('pending', 'processing', 'completed')), 0) AS withdrawn`,
-      [hostId, hostId],
+      [hostId, RECORD_STATUS.ACTIVE, hostId],
     );
 
     const available =

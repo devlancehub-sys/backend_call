@@ -220,7 +220,52 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Created refresh_tokens table');
     }
 
+    await this.ensureRecordStatusColumns();
     await this.ensurePerformanceIndexes();
+  }
+
+  /** Standard row status: inactive | active | disabled — app queries use active only. */
+  private async ensureRecordStatusColumns() {
+    const statusType = "ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active'";
+
+    if (!(await this.hasColumn('users', 'status'))) {
+      await this.query(`ALTER TABLE users ADD COLUMN status ${statusType}`);
+      if (await this.hasColumn('users', 'is_active')) {
+        await this.query(
+          `UPDATE users SET status = CASE WHEN is_active = 1 THEN 'active' ELSE 'inactive' END`,
+        );
+        await this.query('ALTER TABLE users DROP COLUMN is_active');
+        this.logger.log('Migrated users.is_active → users.status');
+      }
+    }
+
+    if (await this.hasTable('languages') && !(await this.hasColumn('languages', 'status'))) {
+      await this.query(`ALTER TABLE languages ADD COLUMN status ${statusType}`);
+      if (await this.hasColumn('languages', 'is_active')) {
+        await this.query(
+          `UPDATE languages SET status = CASE WHEN is_active = 1 THEN 'active' ELSE 'inactive' END`,
+        );
+        await this.query('ALTER TABLE languages DROP COLUMN is_active');
+        this.logger.log('Migrated languages.is_active → languages.status');
+      }
+    }
+
+    const tablesNeedingStatus = [
+      'female_hosts',
+      'wallets',
+      'earnings',
+      'favorites',
+      'user_languages',
+      'refresh_tokens',
+      'call_logs',
+    ];
+
+    for (const table of tablesNeedingStatus) {
+      if ((await this.hasTable(table)) && !(await this.hasColumn(table, 'status'))) {
+        await this.query(`ALTER TABLE ${table} ADD COLUMN status ${statusType}`);
+        this.logger.log(`Added ${table}.status column`);
+      }
+    }
   }
 
   /** Add composite indexes for hot query paths (idempotent). */
@@ -253,8 +298,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       },
       {
         table: 'users',
-        name: 'idx_users_role_active_online',
-        sql: 'CREATE INDEX idx_users_role_active_online ON users (role, is_active, is_online)',
+        name: 'idx_users_role_status_online',
+        sql: 'CREATE INDEX idx_users_role_status_online ON users (role, status, is_online)',
       },
       {
         table: 'users',

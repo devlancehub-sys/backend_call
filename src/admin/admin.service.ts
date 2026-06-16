@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class AdminService {
@@ -43,7 +44,7 @@ export class AdminService {
   }
 
   async getUsers(role?: string) {
-    let sql = 'SELECT id, phone, name, role, is_active, is_online, created_at FROM users WHERE role != "admin"';
+    let sql = 'SELECT id, phone, name, role, status, is_online, created_at FROM users WHERE role != "admin"';
     const params: any[] = [];
     if (role) {
       sql += ' AND role = ?';
@@ -56,7 +57,7 @@ export class AdminService {
 
   async getHosts() {
     const hosts = await this.db.query(
-      `SELECT u.id, u.name, u.phone, u.username, u.is_online, fh.rate_per_minute,
+      `SELECT u.id, u.name, u.phone, u.username, u.is_online, u.status, fh.rate_per_minute,
               fh.total_calls, fh.rating, fh.is_featured
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id ORDER BY u.created_at DESC`,
     );
@@ -104,5 +105,30 @@ export class AdminService {
     }
     await this.platformSettings.refresh();
     return { success: true, message: 'Settings updated' };
+  }
+
+  async updateUserStatus(
+    userId: number,
+    status: 'inactive' | 'active' | 'disabled',
+  ) {
+    const allowed = [RECORD_STATUS.INACTIVE, RECORD_STATUS.ACTIVE, RECORD_STATUS.DISABLED];
+    if (!allowed.includes(status)) {
+      return { success: false, message: 'Invalid status' };
+    }
+
+    await this.db.query('UPDATE users SET status = ? WHERE id = ? AND role != ?', [
+      status,
+      userId,
+      'admin',
+    ]);
+
+    if (status !== RECORD_STATUS.ACTIVE) {
+      await this.db.query('UPDATE refresh_tokens SET status = ? WHERE user_id = ?', [
+        RECORD_STATUS.INACTIVE,
+        userId,
+      ]);
+    }
+
+    return { success: true, message: `User status updated to ${status}` };
   }
 }

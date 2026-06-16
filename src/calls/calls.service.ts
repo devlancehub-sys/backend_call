@@ -16,6 +16,7 @@ import {
 } from '../common/utils/rate-tier.util';
 import { ZegoTokenService } from '../zego/zego-token.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 const RING_TIMEOUT_MS = 45_000;
 
@@ -43,16 +44,16 @@ export class CallsService {
     const hosts = await this.db.query<any[]>(
       `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls
        FROM users u
-       JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.id = ? AND u.role = 'female'`,
-      [hostId],
+       JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
+       WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
+      [RECORD_STATUS.ACTIVE, hostId, RECORD_STATUS.ACTIVE],
     );
 
     if (!hosts.length) throw new NotFoundException('Host not found');
 
     const callers = await this.db.query<any[]>(
-      `SELECT id, name, avatar_url FROM users WHERE id = ? AND role = 'male'`,
-      [callerId],
+      `SELECT id, name, avatar_url FROM users WHERE id = ? AND role = 'male' AND status = ?`,
+      [callerId, RECORD_STATUS.ACTIVE],
     );
 
     const totalCalls = parseInt(String(hosts[0].total_calls ?? 0), 10);
@@ -106,16 +107,16 @@ export class CallsService {
 
     const hosts = await this.db.query<any[]>(
       `SELECT u.id, u.name, u.avatar_url, fh.total_calls FROM users u
-       JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.id = ? AND u.role = 'female'`,
-      [hostId],
+       JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
+       WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
+      [RECORD_STATUS.ACTIVE, hostId, RECORD_STATUS.ACTIVE],
     );
     if (!hosts.length) throw new NotFoundException('Host profile not found');
 
     const callers = await this.db.query<any[]>(
       `SELECT u.id, u.name, u.avatar_url, u.is_online FROM users u
-       WHERE u.id = ? AND u.role = 'male' AND u.is_active = 1`,
-      [callerId],
+       WHERE u.id = ? AND u.role = 'male' AND u.status = ?`,
+      [callerId, RECORD_STATUS.ACTIVE],
     );
     if (!callers.length) throw new NotFoundException('User not found');
 
@@ -283,8 +284,8 @@ export class CallsService {
       await conn.beginTransaction();
 
       const [wallets] = await conn.query<any[]>(
-        'SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE',
-        [call.caller_id],
+        'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
+        [call.caller_id, RECORD_STATUS.ACTIVE],
       );
       const newBalance = Math.max(0, parseFloat(wallets[0].balance) - billing.totalAmount);
       await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [
@@ -311,8 +312,8 @@ export class CallsService {
       );
 
       await conn.query(
-        `INSERT INTO call_logs (call_id, caller_id, host_id, duration_seconds, amount_deducted, host_earning)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO call_logs (call_id, caller_id, host_id, duration_seconds, amount_deducted, host_earning, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [
           call.id,
           call.caller_id,
@@ -320,12 +321,13 @@ export class CallsService {
           durationSeconds,
           billing.totalAmount,
           billing.hostEarning,
+          RECORD_STATUS.ACTIVE,
         ],
       );
 
       await conn.query(
-        `INSERT INTO earnings (host_id, call_id, amount, type, description) VALUES (?, ?, ?, 'call', ?)`,
-        [call.host_id, call.id, billing.hostEarning, `Call #${call.id}`],
+        `INSERT INTO earnings (host_id, call_id, amount, type, description, status) VALUES (?, ?, ?, 'call', ?, ?)`,
+        [call.host_id, call.id, billing.hostEarning, `Call #${call.id}`, RECORD_STATUS.ACTIVE],
       );
 
       await conn.query(
@@ -516,8 +518,8 @@ export class CallsService {
 
   private async ensureCallerBalance(callerId: number, ratePerMinute: number) {
     const wallets = await this.db.query<any[]>(
-      'SELECT balance FROM wallets WHERE user_id = ?',
-      [callerId],
+      'SELECT balance FROM wallets WHERE user_id = ? AND status = ?',
+      [callerId, RECORD_STATUS.ACTIVE],
     );
     if (parseFloat(wallets[0]?.balance || 0) < ratePerMinute) {
       throw new BadRequestException('Insufficient balance');

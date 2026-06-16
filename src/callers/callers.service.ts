@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class CallersService {
@@ -12,11 +13,11 @@ export class CallersService {
       `SELECT u.id, u.name, u.phone, u.avatar_url, u.age, u.about, u.is_online,
               COALESCE(w.balance, 0) as wallet_balance
        FROM users u
-       LEFT JOIN wallets w ON w.user_id = u.id
-       WHERE u.role = 'male' AND u.is_active = 1
+       LEFT JOIN wallets w ON w.user_id = u.id AND w.status = ?
+       WHERE u.role = 'male' AND u.status = ?
        ORDER BY u.is_online DESC, u.name ASC
        LIMIT ?`,
-      [safeLimit],
+      [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE, safeLimit],
     );
     return { success: true, data: callers.map(this.formatCaller) };
   }
@@ -27,11 +28,11 @@ export class CallersService {
       `SELECT u.id, u.name, u.phone, u.avatar_url, u.age, u.about, u.is_online,
               COALESCE(w.balance, 0) as wallet_balance
        FROM users u
-       LEFT JOIN wallets w ON w.user_id = u.id
-       WHERE u.role = 'male' AND u.is_active = 1 AND u.is_online = 1
+       LEFT JOIN wallets w ON w.user_id = u.id AND w.status = ?
+       WHERE u.role = 'male' AND u.status = ? AND u.is_online = 1
        ORDER BY u.name ASC
        LIMIT ?`,
-      [safeLimit],
+      [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE, safeLimit],
     );
     return { success: true, data: callers.map(this.formatCaller) };
   }

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 type EarningsSummaryData = {
   today_earnings: number;
@@ -55,8 +56,8 @@ export class EarningsService {
                THEN amount ELSE 0 END), 0) AS monthly_earnings,
              COALESCE(SUM(amount), 0) AS total_earnings
            FROM earnings
-           WHERE host_id = ?`,
-          [hostId],
+           WHERE host_id = ? AND status = ?`,
+          [hostId, RECORD_STATUS.ACTIVE],
         ),
         this.db.query<any[]>(
           `SELECT COALESCE(SUM(amount), 0) as withdrawn FROM withdraw_requests
@@ -98,8 +99,8 @@ export class EarningsService {
         `SELECT e.*, u.name as caller_name FROM earnings e
          LEFT JOIN calls c ON c.id = e.call_id
          LEFT JOIN users u ON u.id = c.caller_id
-         WHERE e.host_id = ? ORDER BY e.created_at DESC LIMIT ? OFFSET ?`,
-        [hostId, safeLimit, offset],
+         WHERE e.host_id = ? AND e.status = ? ORDER BY e.created_at DESC LIMIT ? OFFSET ?`,
+        [hostId, RECORD_STATUS.ACTIVE, safeLimit, offset],
       );
 
       return { success: true, data: Array.isArray(earnings) ? earnings : [] };

@@ -4,6 +4,7 @@ import {
   defaultGirlAvatarUrl,
   normalizeGirlAvatarUrl,
 } from '../common/utils/avatar.util';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class UsersService {
@@ -14,16 +15,17 @@ export class UsersService {
       `SELECT u.id, u.phone, u.username, u.role, u.name, u.email, u.avatar_url, u.age, u.about, u.is_online,
               w.balance, fh.rate_per_minute, fh.kyc_status, fh.rating, fh.total_calls
        FROM users u
-       LEFT JOIN wallets w ON w.user_id = u.id
-       LEFT JOIN female_hosts fh ON fh.user_id = u.id
-       WHERE u.id = ?`,
-      [userId],
+       LEFT JOIN wallets w ON w.user_id = u.id AND w.status = ?
+       LEFT JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
+       WHERE u.id = ? AND u.status = ?`,
+      [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE, userId, RECORD_STATUS.ACTIVE],
     );
 
     const langs = await this.db.query<any[]>(
       `SELECT l.id, l.name, l.code FROM user_languages ul
-       JOIN languages l ON l.id = ul.language_id WHERE ul.user_id = ?`,
-      [userId],
+       JOIN languages l ON l.id = ul.language_id AND l.status = ?
+       WHERE ul.user_id = ? AND ul.status = ?`,
+      [RECORD_STATUS.ACTIVE, userId, RECORD_STATUS.ACTIVE],
     );
 
     const profile = { ...users[0], languages: langs };
@@ -63,12 +65,16 @@ export class UsersService {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      await conn.query('DELETE FROM user_languages WHERE user_id = ?', [userId]);
+      await conn.query('UPDATE user_languages SET status = ? WHERE user_id = ?', [
+        RECORD_STATUS.INACTIVE,
+        userId,
+      ]);
       for (const langId of languageIds) {
-        await conn.query('INSERT INTO user_languages (user_id, language_id) VALUES (?, ?)', [
-          userId,
-          langId,
-        ]);
+        await conn.query(
+          `INSERT INTO user_languages (user_id, language_id, status) VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE status = ?`,
+          [userId, langId, RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE],
+        );
       }
       await conn.commit();
       return { success: true, message: 'Languages updated' };

@@ -10,6 +10,7 @@ import { AuthService } from '../auth/auth.service';
 import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { CreateHostDto, HostLoginDto } from './dto/host-auth.dto';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class HostAuthService {
@@ -25,8 +26,8 @@ export class HostAuthService {
     try {
       const rows = await this.db.query<any[]>(
         `SELECT u.* FROM users u
-         WHERE u.username = ? AND u.role = 'female' AND u.is_active = 1`,
-        [dto.username.trim().toLowerCase()],
+         WHERE u.username = ? AND u.role = 'female' AND u.status = ?`,
+        [dto.username.trim().toLowerCase(), RECORD_STATUS.ACTIVE],
       );
 
       if (!rows.length || !rows[0].password_hash) {
@@ -55,8 +56,8 @@ export class HostAuthService {
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
       await this.db.query(
-        'INSERT INTO refresh_tokens (user_id, token, device_id, expires_at) VALUES (?, ?, ?, ?)',
-        [user.id, tokens.refreshToken, dto.device_id || null, expiresAt],
+        'INSERT INTO refresh_tokens (user_id, token, device_id, expires_at, status) VALUES (?, ?, ?, ?, ?)',
+        [user.id, tokens.refreshToken, dto.device_id || null, expiresAt, RECORD_STATUS.ACTIVE],
       );
 
       return {
@@ -107,18 +108,21 @@ export class HostAuthService {
       await conn.beginTransaction();
 
       const [result] = await conn.query<any>(
-        `INSERT INTO users (phone, role, name, username, password_hash, is_active)
-         VALUES (?, 'female', ?, ?, ?, 1)`,
-        [phone, dto.name.trim(), username, passwordHash],
+        `INSERT INTO users (phone, role, name, username, password_hash, status)
+         VALUES (?, 'female', ?, ?, ?, ?)`,
+        [phone, dto.name.trim(), username, passwordHash, RECORD_STATUS.ACTIVE],
       );
 
       const userId = result.insertId;
-      await conn.query('INSERT INTO wallets (user_id, balance) VALUES (?, 0)', [userId]);
+      await conn.query('INSERT INTO wallets (user_id, balance, status) VALUES (?, 0, ?)', [
+        userId,
+        RECORD_STATUS.ACTIVE,
+      ]);
 
       const rate = this.platformSettings.getDefaultHostRate();
       await conn.query(
-        `INSERT INTO female_hosts (user_id, rate_per_minute, kyc_status) VALUES (?, ?, 'approved')`,
-        [userId, rate],
+        `INSERT INTO female_hosts (user_id, rate_per_minute, kyc_status, status) VALUES (?, ?, 'approved', ?)`,
+        [userId, rate, RECORD_STATUS.ACTIVE],
       );
 
       await conn.commit();

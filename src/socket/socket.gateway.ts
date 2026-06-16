@@ -3,152 +3,153 @@ import {
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
+  ConnectedSocket,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { DatabaseService } from '../database/database.service';
+import { OnlineUserManagerService } from './online-user-manager.service';
 
 @WebSocketGateway({
   cors: { origin: '*' },
+  transports: ['websocket'],
   pingInterval: 25_000,
   pingTimeout: 20_000,
+  connectTimeout: 15_000,
   maxHttpBufferSize: 1e5,
+  perMessageDeflate: false,
 })
-export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(SocketGateway.name);
 
   @WebSocketServer()
   server: Server;
 
-  private onlineUsers = new Map<number, string>();
-
   constructor(
-    private jwt: JwtService,
-    private config: ConfigService,
-    private db: DatabaseService,
+    private readonly jwt: JwtService,
+    private readonly config: ConfigService,
+    private readonly presence: OnlineUserManagerService,
   ) {}
 
-  async handleConnection(client: Socket) {
+  afterInit(server: Server) {
+    this.presence.attachServer(server);
+    this.logger.log('Socket.IO gateway initialized');
+  }
+
+  async handleConnection(@ConnectedSocket() client: Socket) {
     try {
       const token = client.handshake.auth?.token;
-      if (!token) return client.disconnect();
+      if (!token) {
+        client.disconnect(true);
+        return;
+      }
 
-      const payload = this.jwt.verify(token, { secret: this.config.get('JWT_SECRET') }) as any;
-      const userId = payload.id as number;
-      const role = payload.role as string;
+      const payload = this.jwt.verify(token, {
+        secret: this.config.get('JWT_SECRET'),
+      }) as { id: number; role: string };
+
+      const userId = Number(payload.id);
+      const role = payload.role;
+      if (!userId || !role) {
+        client.disconnect(true);
+        return;
+      }
 
       client.data.userId = userId;
       client.data.userRole = role;
 
-      // Replace stale socket for the same user (reconnect / duplicate tab).
-      const previousSocketId = this.onlineUsers.get(userId);
-      if (previousSocketId && previousSocketId !== client.id) {
-        this.server.sockets.sockets.get(previousSocketId)?.disconnect(true);
+      const { isReconnect, replacedSocketId } = this.presence.registerConnection(
+        userId,
+        client.id,
+        role,
+      );
+
+      if (replacedSocketId) {
+        client.data.replacedSocket = true;
       }
 
-      this.onlineUsers.set(userId, client.id);
       client.join(`user:${userId}`);
-      if (role === 'female') {
-        client.join('role:female');
-      } else if (role === 'male') {
-        client.join('role:male');
-      }
+      if (role === 'female') client.join('role:female');
+      else if (role === 'male') client.join('role:male');
 
-      // Presence is tracked in-memory for routing; DB sync is best-effort only.
-      this.db
-        .query('UPDATE users SET is_online = 1, last_seen_at = NOW() WHERE id = ?', [userId])
-        .catch((err) =>
-          this.logger.warn(`Could not mark user ${userId} online: ${(err as Error)?.message || err}`),
-        );
-
-      if (role === 'female') {
-        this.server.to('role:male').emit('host_online', { host_id: userId });
-      } else if (role === 'male') {
-        this.server.to('role:female').emit('user_online', { user_id: userId });
-      }
-    } catch {
-      client.disconnect();
+      this.presence.emitPresenceOnline(userId, role, isReconnect);
+    } catch (err) {
+      this.logger.warn(`Connection rejected: ${(err as Error)?.message || err}`);
+      client.disconnect(true);
     }
   }
 
-  async handleDisconnect(client: Socket) {
+  async handleDisconnect(@ConnectedSocket() client: Socket) {
+    this.presence.handleDisconnect(client.id);
+  }
+
+  /** App-level heartbeat — updates last-seen; Socket.IO ping/pong handles transport health. */
+  @SubscribeMessage('presence_ping')
+  handlePresencePing(@ConnectedSocket() client: Socket) {
     const userId = client.data.userId as number | undefined;
-    const role = client.data.userRole as string | undefined;
-    if (!userId) return;
-
-    // Ignore disconnect from a replaced/stale socket.
-    if (this.onlineUsers.get(userId) !== client.id) return;
-
-    this.onlineUsers.delete(userId);
-
-    this.db
-      .query('UPDATE users SET is_online = 0, last_seen_at = NOW() WHERE id = ?', [userId])
-      .catch((err) =>
-        this.logger.warn(`Could not mark user ${userId} offline: ${(err as Error)?.message || err}`),
-      );
-
-    if (role === 'female') {
-      this.server.to('role:male').emit('host_offline', { host_id: userId });
-    } else if (role === 'male') {
-      this.server.to('role:female').emit('user_offline', { user_id: userId });
-    }
+    if (!userId) return { ok: false };
+    this.presence.touchHeartbeat(userId);
+    return { ok: true, ts: Date.now() };
   }
 
   @SubscribeMessage('incoming_call')
-  handleIncomingCall(_client: Socket, data: { host_id: number }) {
-    this.server.to(`user:${data.host_id}`).emit('incoming_call', data);
+  handleIncomingCall(@ConnectedSocket() client: Socket, data: { host_id: number }) {
+    this.emitToUserRoom(data.host_id, 'incoming_call', data);
   }
 
   @SubscribeMessage('call_accepted')
-  handleCallAccepted(_client: Socket, data: { caller_id: number; host_id?: number }) {
-    this.server.to(`user:${data.caller_id}`).emit('call_accepted', data);
-    if (data.host_id) {
-      this.server.to(`user:${data.host_id}`).emit('call_accepted', data);
-    }
+  handleCallAccepted(
+    @ConnectedSocket() client: Socket,
+    data: { caller_id: number; host_id?: number },
+  ) {
+    this.emitToUserRoom(data.caller_id, 'call_accepted', data);
+    if (data.host_id) this.emitToUserRoom(data.host_id, 'call_accepted', data);
   }
 
   @SubscribeMessage('call_rejected')
-  handleCallRejected(_client: Socket, data: { caller_id: number; host_id?: number }) {
-    this.server.to(`user:${data.caller_id}`).emit('call_rejected', data);
-    if (data.host_id) {
-      this.server.to(`user:${data.host_id}`).emit('call_rejected', data);
-    }
+  handleCallRejected(
+    @ConnectedSocket() client: Socket,
+    data: { caller_id: number; host_id?: number },
+  ) {
+    this.emitToUserRoom(data.caller_id, 'call_rejected', data);
+    if (data.host_id) this.emitToUserRoom(data.host_id, 'call_rejected', data);
   }
 
   @SubscribeMessage('call_ended')
-  handleCallEnded(_client: Socket, data: { caller_id?: number; host_id?: number; call_id?: number }) {
-    if (data.caller_id) {
-      this.server.to(`user:${data.caller_id}`).emit('call_ended', data);
-    }
-    if (data.host_id) {
-      this.server.to(`user:${data.host_id}`).emit('call_ended', data);
-    }
+  handleCallEnded(
+    @ConnectedSocket() client: Socket,
+    data: { caller_id?: number; host_id?: number; call_id?: number },
+  ) {
+    if (data.caller_id) this.emitToUserRoom(data.caller_id, 'call_ended', data);
+    if (data.host_id) this.emitToUserRoom(data.host_id, 'call_ended', data);
   }
 
   @SubscribeMessage('wallet_updated')
-  handleWalletUpdated(_client: Socket, data: { user_id: number }) {
-    this.server.to(`user:${data.user_id}`).emit('wallet_updated', data);
+  handleWalletUpdated(@ConnectedSocket() client: Socket, data: { user_id: number }) {
+    this.emitToUserRoom(data.user_id, 'wallet_updated', data);
   }
 
   @SubscribeMessage('earning_updated')
-  handleEarningUpdated(_client: Socket, data: { host_id: number }) {
-    this.server.to(`user:${data.host_id}`).emit('earning_updated', data);
+  handleEarningUpdated(@ConnectedSocket() client: Socket, data: { host_id: number }) {
+    this.emitToUserRoom(data.host_id, 'earning_updated', data);
   }
 
-  /** Push event to a specific user (e.g. boy gets call when girl initiates) */
   notifyUser(userId: number, event: string, data: Record<string, unknown>): boolean {
-    const socketId = this.onlineUsers.get(userId);
-    if (socketId) {
-      this.server.to(socketId).emit(event, data);
-      return true;
-    }
-    return false;
+    return this.presence.emitToUser(userId, event, data);
   }
 
   isUserOnline(userId: number): boolean {
-    return this.onlineUsers.has(userId);
+    return this.presence.isUserOnline(userId);
+  }
+
+  getPresenceStats() {
+    return this.presence.getStats();
+  }
+
+  private emitToUserRoom(userId: number, event: string, data: unknown) {
+    this.server.to(`user:${userId}`).emit(event, data);
   }
 }

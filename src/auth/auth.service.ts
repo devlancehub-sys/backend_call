@@ -1,8 +1,9 @@
-import { Injectable, Logger, UnauthorizedException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, BadRequestException, InternalServerErrorException, ForbiddenException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../database/database.service';
 import { QuickLoginDto } from './dto/auth.dto';
+import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class AuthService {
@@ -41,11 +42,13 @@ export class AuthService {
 
       if (existing.length) {
         user = existing[0];
-        await conn.query('UPDATE users SET name = ?, fcm_token = ? WHERE id = ?', [
-          name,
-          dto.fcm_token || user.fcm_token,
-          user.id,
-        ]);
+        if (user.status === RECORD_STATUS.DISABLED) {
+          throw new ForbiddenException('Account is disabled');
+        }
+        await conn.query(
+          'UPDATE users SET name = ?, fcm_token = ?, status = ? WHERE id = ?',
+          [name, dto.fcm_token || user.fcm_token, RECORD_STATUS.ACTIVE, user.id],
+        );
         user.name = name;
 
         const [walletRows] = await conn.query<any[]>(
@@ -53,24 +56,30 @@ export class AuthService {
           [user.id],
         );
         if (!Array.isArray(walletRows) || walletRows.length === 0) {
-          await conn.query('INSERT INTO wallets (user_id, balance) VALUES (?, 0)', [user.id]);
+          await conn.query('INSERT INTO wallets (user_id, balance, status) VALUES (?, 0, ?)', [
+            user.id,
+            RECORD_STATUS.ACTIVE,
+          ]);
         }
       } else {
         const phone = `9${Date.now()}${Math.floor(Math.random() * 90 + 10)}`.slice(0, 15);
         const [result] = await conn.query<any>(
-          'INSERT INTO users (phone, role, name, device_id, fcm_token) VALUES (?, ?, ?, ?, ?)',
-          [phone, 'male', name, deviceId, dto.fcm_token || null],
+          'INSERT INTO users (phone, role, name, device_id, fcm_token, status) VALUES (?, ?, ?, ?, ?, ?)',
+          [phone, 'male', name, deviceId, dto.fcm_token || null, RECORD_STATUS.ACTIVE],
         );
         user = { id: result.insertId, phone, role: 'male', name };
-        await conn.query('INSERT INTO wallets (user_id, balance) VALUES (?, 0)', [user.id]);
+        await conn.query('INSERT INTO wallets (user_id, balance, status) VALUES (?, 0, ?)', [
+          user.id,
+          RECORD_STATUS.ACTIVE,
+        ]);
       }
 
       const tokens = this.generateTokens(user);
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
       await conn.query(
-        'INSERT INTO refresh_tokens (user_id, token, device_id, expires_at) VALUES (?, ?, ?, ?)',
-        [user.id, tokens.refreshToken, deviceId, expiresAt],
+        'INSERT INTO refresh_tokens (user_id, token, device_id, expires_at, status) VALUES (?, ?, ?, ?, ?)',
+        [user.id, tokens.refreshToken, deviceId, expiresAt, RECORD_STATUS.ACTIVE],
       );
 
       await conn.commit();
@@ -112,12 +121,16 @@ export class AuthService {
       }) as any;
 
       const rows = await this.db.query<any[]>(
-        'SELECT * FROM refresh_tokens WHERE token = ? AND expires_at > NOW()',
-        [refreshToken],
+        'SELECT * FROM refresh_tokens WHERE token = ? AND expires_at > NOW() AND status = ?',
+        [refreshToken, RECORD_STATUS.ACTIVE],
       );
       if (!rows.length) throw new UnauthorizedException('Invalid refresh token');
 
-      const users = await this.db.query<any[]>('SELECT * FROM users WHERE id = ?', [decoded.id]);
+      const users = await this.db.query<any[]>(
+        'SELECT * FROM users WHERE id = ? AND status = ?',
+        [decoded.id, RECORD_STATUS.ACTIVE],
+      );
+      if (!users.length) throw new UnauthorizedException('Account is not active');
       return { success: true, data: this.generateTokens(users[0]) };
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
@@ -126,7 +139,10 @@ export class AuthService {
 
   async logout(refreshToken?: string) {
     if (refreshToken) {
-      await this.db.query('DELETE FROM refresh_tokens WHERE token = ?', [refreshToken]);
+      await this.db.query(
+        'UPDATE refresh_tokens SET status = ? WHERE token = ?',
+        [RECORD_STATUS.INACTIVE, refreshToken],
+      );
     }
     return { success: true, message: 'Logged out' };
   }

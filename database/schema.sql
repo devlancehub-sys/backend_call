@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
   avatar_url      VARCHAR(500)  NULL,
   about           TEXT          NULL,
   is_online       TINYINT(1)    NOT NULL DEFAULT 0,
-  is_active       TINYINT(1)    NOT NULL DEFAULT 1,
+  status          ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   last_seen_at    DATETIME      NULL,
   created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -40,24 +40,24 @@ CREATE TABLE IF NOT EXISTS languages (
   id         INT          NOT NULL AUTO_INCREMENT,
   name       VARCHAR(100) NOT NULL,
   code       VARCHAR(10)  NOT NULL,
-  is_active  TINYINT(1)   NOT NULL DEFAULT 1,
+  status     ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_languages_code (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO languages (name, code, is_active) VALUES
-  ('English',    'en',    1),
-  ('Hindi',      'hi',    1),
-  ('Spanish',    'es',    1),
-  ('French',     'fr',    1),
-  ('Arabic',     'ar',    1),
-  ('Portuguese', 'pt',    1),
-  ('Bengali',    'bn',    1),
-  ('Punjabi',    'pa',    1),
-  ('Tamil',      'ta',    1),
-  ('Telugu',     'te',    1)
-ON DUPLICATE KEY UPDATE name = VALUES(name), is_active = VALUES(is_active);
+INSERT INTO languages (name, code, status) VALUES
+  ('English',    'en',    'active'),
+  ('Hindi',      'hi',    'active'),
+  ('Spanish',    'es',    'active'),
+  ('French',     'fr',    'active'),
+  ('Arabic',     'ar',    'active'),
+  ('Portuguese', 'pt',    'active'),
+  ('Bengali',    'bn',    'active'),
+  ('Punjabi',    'pa',    'active'),
+  ('Tamil',      'ta',    'active'),
+  ('Telugu',     'te',    'active')
+ON DUPLICATE KEY UPDATE name = VALUES(name), status = VALUES(status);
 
 -- -------------------------------------------------------------
 -- Wallets (one per user)
@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS wallets (
   user_id    INT            NOT NULL,
   balance    DECIMAL(12,2)  NOT NULL DEFAULT 0.00,
   currency   VARCHAR(10)    NOT NULL DEFAULT 'INR',
+  status     ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   created_at DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_wallets_user (user_id),
@@ -101,6 +102,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   token      TEXT         NOT NULL,
   device_id  VARCHAR(255) NULL,
   expires_at DATETIME     NOT NULL,
+  status     ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_rt_user (user_id),
@@ -119,6 +121,7 @@ CREATE TABLE IF NOT EXISTS female_hosts (
   total_duration_seconds INT            NOT NULL DEFAULT 0,
   is_featured            TINYINT(1)     NOT NULL DEFAULT 0,
   kyc_status             ENUM('pending','submitted','approved','rejected') NOT NULL DEFAULT 'pending',
+  status                 ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   created_at             DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_fh_user (user_id),
@@ -131,6 +134,7 @@ CREATE TABLE IF NOT EXISTS female_hosts (
 CREATE TABLE IF NOT EXISTS user_languages (
   user_id     INT NOT NULL,
   language_id INT NOT NULL,
+  status      ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   PRIMARY KEY (user_id, language_id),
   CONSTRAINT fk_ul_user     FOREIGN KEY (user_id)     REFERENCES users     (id) ON DELETE CASCADE,
   CONSTRAINT fk_ul_language FOREIGN KEY (language_id) REFERENCES languages (id) ON DELETE CASCADE
@@ -142,6 +146,7 @@ CREATE TABLE IF NOT EXISTS user_languages (
 CREATE TABLE IF NOT EXISTS favorites (
   user_id    INT      NOT NULL,
   host_id    INT      NOT NULL,
+  status     ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, host_id),
   CONSTRAINT fk_fav_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
@@ -184,6 +189,7 @@ CREATE TABLE IF NOT EXISTS call_logs (
   duration_seconds INT           NOT NULL DEFAULT 0,
   amount_deducted  DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   host_earning     DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+  status           ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_cl_call   (call_id),
@@ -204,6 +210,7 @@ CREATE TABLE IF NOT EXISTS earnings (
   amount      DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   type        VARCHAR(50)   NOT NULL DEFAULT 'call',
   description VARCHAR(255)  NULL,
+  status      ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
   created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_earnings_host (host_id),
