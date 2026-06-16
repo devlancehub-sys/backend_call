@@ -221,7 +221,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.ensureRecordStatusColumns();
-    await this.ensurePerformanceIndexes();
+    void this.ensurePerformanceIndexes().catch((err) =>
+      this.logger.warn(`Background index migration skipped: ${(err as Error)?.message || err}`),
+    );
   }
 
   /** Standard row status: inactive | active | disabled — app queries use active only. */
