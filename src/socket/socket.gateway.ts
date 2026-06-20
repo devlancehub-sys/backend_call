@@ -145,6 +145,10 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     return this.presence.isUserOnline(userId);
   }
 
+  isUserInCall(userId: number): boolean {
+    return this.presence.isUserInCall(userId);
+  }
+
   getPresenceStats() {
     return this.presence.getStats();
   }

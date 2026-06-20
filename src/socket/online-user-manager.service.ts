@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Server } from 'socket.io';
 import { DatabaseService } from '../database/database.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
@@ -26,11 +26,13 @@ export interface PresenceStats {
 }
 
 @Injectable()
-export class OnlineUserManagerService implements OnModuleDestroy {
+export class OnlineUserManagerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OnlineUserManagerService.name);
 
   /** userId → active session */
   private readonly sessions = new Map<number, OnlineSession>();
+  /** userIds currently in an active voice call */
+  private readonly inCallUsers = new Set<number>();
   /** socketId → userId (fast disconnect lookup) */
   private readonly socketIndex = new Map<string, number>();
   /** Grace-period timers before marking a user offline */
@@ -46,6 +48,25 @@ export class OnlineUserManagerService implements OnModuleDestroy {
   private readonly staleSweepMs = Number(process.env.SOCKET_STALE_SWEEP_MS) || 60_000;
 
   constructor(private readonly db: DatabaseService) {}
+
+  async onModuleInit() {
+    try {
+      const rows = await this.db.query<{ caller_id: number; host_id: number }[]>(
+        `SELECT caller_id, host_id FROM calls WHERE status = 'active'`,
+      );
+      for (const row of rows) {
+        this.inCallUsers.add(Number(row.caller_id));
+        this.inCallUsers.add(Number(row.host_id));
+      }
+      if (rows.length) {
+        this.logger.log(`Restored ${this.inCallUsers.size} in-call user(s) from DB`);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Failed to restore in-call users: ${(err as Error)?.message || err}`,
+      );
+    }
+  }
 
   attachServer(server: Server) {
     this.server = server;
@@ -131,6 +152,32 @@ export class OnlineUserManagerService implements OnModuleDestroy {
     const session = this.sessions.get(userId);
     if (!session || !this.server) return false;
     return this.server.sockets.sockets.has(session.socketId);
+  }
+
+  isUserInCall(userId: number): boolean {
+    return this.inCallUsers.has(userId);
+  }
+
+  markUsersInCall(callerId: number, hostId: number) {
+    this.inCallUsers.add(callerId);
+    this.inCallUsers.add(hostId);
+    this.emitBusyChange(callerId, hostId, true);
+  }
+
+  clearUsersInCall(callerId: number, hostId: number) {
+    this.inCallUsers.delete(callerId);
+    this.inCallUsers.delete(hostId);
+    this.emitBusyChange(callerId, hostId, false);
+  }
+
+  private emitBusyChange(callerId: number, hostId: number, busy: boolean) {
+    if (!this.server) return;
+
+    const hostEvent = busy ? 'host_busy' : 'host_available';
+    const userEvent = busy ? 'user_busy' : 'user_available';
+
+    this.server.to('role:male').emit(hostEvent, { host_id: hostId });
+    this.server.to('role:female').emit(userEvent, { user_id: callerId });
   }
 
   getSession(userId: number): OnlineSession | undefined {
@@ -284,6 +331,7 @@ export class OnlineUserManagerService implements OnModuleDestroy {
     this.dbSyncTimers.clear();
     this.sessions.clear();
     this.socketIndex.clear();
+    this.inCallUsers.clear();
 
     this.logger.log('Online user manager destroyed — all sessions cleared');
   }

@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class CallersService {
-  constructor(private db: DatabaseService) {}
+  constructor(
+    private db: DatabaseService,
+    private presence: OnlineUserManagerService,
+  ) {}
 
   /** Male users list — for girls app (larka list) */
   async browse(limit = 50) {
@@ -37,8 +41,10 @@ export class CallersService {
     return { success: true, data: callers.map(this.formatCaller) };
   }
 
-  private formatCaller(row: any) {
+  private formatCaller = (row: any) => {
     const balance = parseFloat(row.wallet_balance || 0);
+    const userId = Number(row.id);
+    const isBusy = this.presence.isUserInCall(userId);
     return {
       id: row.id,
       name: row.name,
@@ -47,7 +53,8 @@ export class CallersService {
       age: row.age,
       about: row.about,
       is_online: row.is_online === 1 || row.is_online === true,
-      can_call: balance > 0,
+      is_busy: isBusy,
+      can_call: balance > 0 && !isBusy,
     };
-  }
+  };
 }

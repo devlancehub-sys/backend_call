@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseService } from '../database/database.service';
 import { SocketGateway } from '../socket/socket.gateway';
+import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import { calculateBilling } from '../common/utils/billing.util';
 import {
   getHostLevel,
@@ -29,6 +30,7 @@ export class CallsService {
     private db: DatabaseService,
     private config: ConfigService,
     private socket: SocketGateway,
+    private presence: OnlineUserManagerService,
     private zegoToken: ZegoTokenService,
     private platformSettings: PlatformSettingsService,
   ) {}
@@ -39,6 +41,14 @@ export class CallsService {
 
     if (!this.socket.isUserOnline(hostId)) {
       throw new BadRequestException('User is offline');
+    }
+
+    if (this.presence.isUserInCall(hostId)) {
+      throw new BadRequestException('User is busy on another call');
+    }
+
+    if (this.presence.isUserInCall(callerId)) {
+      throw new BadRequestException('You are already on a call');
     }
 
     const hosts = await this.db.query<any[]>(
@@ -103,6 +113,14 @@ export class CallsService {
 
     if (!this.socket.isUserOnline(callerId)) {
       throw new BadRequestException('User is offline');
+    }
+
+    if (this.presence.isUserInCall(callerId)) {
+      throw new BadRequestException('User is busy on another call');
+    }
+
+    if (this.presence.isUserInCall(hostId)) {
+      throw new BadRequestException('You are already on a call');
     }
 
     const hosts = await this.db.query<any[]>(
@@ -201,6 +219,8 @@ export class CallsService {
     await this.db.query(`UPDATE calls SET status = 'active', started_at = NOW() WHERE id = ?`, [
       callId,
     ]);
+
+    this.presence.markUsersInCall(call.caller_id, call.host_id);
 
     this.socket.notifyUser(notifyId, 'call_accepted', {
       call_id: callId,
@@ -337,6 +357,8 @@ export class CallsService {
       );
 
       await conn.commit();
+
+      this.presence.clearUsersInCall(call.caller_id, call.host_id);
 
       const endPayload = {
         call_id: call.id,

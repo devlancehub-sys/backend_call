@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import { enrichHostRates } from '../common/utils/rate-tier.util';
 import {
   defaultGirlAvatarUrl,
@@ -7,18 +8,23 @@ import {
 } from '../common/utils/avatar.util';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
-function withHostAvatar(host: Record<string, unknown>) {
+function withHostAvatar(host: Record<string, unknown>, presence?: OnlineUserManagerService) {
   const enriched = enrichHostRates(host);
+  const hostId = Number(enriched.id);
   return {
     ...enriched,
     avatar_url:
       normalizeGirlAvatarUrl(enriched.avatar_url as string) ?? defaultGirlAvatarUrl(),
+    is_busy: presence?.isUserInCall(hostId) ?? false,
   };
 }
 
 @Injectable()
 export class HostsService {
-  constructor(private db: DatabaseService) {}
+  constructor(
+    private db: DatabaseService,
+    private presence: OnlineUserManagerService,
+  ) {}
 
   async browse(query: any) {
     const { language_id, search, page = 1, limit = 20 } = query;
@@ -47,7 +53,7 @@ export class HostsService {
     params.push(limitNum, offsetNum);
 
     const hosts = await this.db.query(sql, params);
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
   async getOnline() {
@@ -59,7 +65,7 @@ export class HostsService {
        ORDER BY fh.rating DESC LIMIT 20`,
       [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE],
     );
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
   async getFeatured() {
@@ -71,7 +77,7 @@ export class HostsService {
        ORDER BY u.is_online DESC LIMIT 10`,
       [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE],
     );
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
   async getFavorites(userId: number) {
@@ -85,7 +91,7 @@ export class HostsService {
        ORDER BY u.is_online DESC`,
       [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE, userId, RECORD_STATUS.ACTIVE],
     );
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h)) };
+    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
   async getById(id: number) {
@@ -107,7 +113,7 @@ export class HostsService {
 
     return {
       success: true,
-      data: { ...withHostAvatar(hosts[0]), languages: langs },
+      data: { ...withHostAvatar(hosts[0], this.presence), languages: langs },
     };
   }
 
