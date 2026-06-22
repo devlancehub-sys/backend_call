@@ -13,7 +13,11 @@ import { KycSubmitDto } from './dto/kyc.dto';
 @Roles('female')
 export class KycController {
   constructor(private kycService: KycService) {}
-
+/**
+ * Get KYC verification status — girls only
+ * @param req - Request object
+ * @returns KYC verification status
+ */
   @Get('status')
   @ApiOperation({ summary: 'Get KYC verification status — girls only' })
   getStatus(@Req() req: any) {
