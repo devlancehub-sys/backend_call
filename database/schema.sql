@@ -266,3 +266,56 @@ INSERT INTO platform_settings (setting_key, setting_value) VALUES
   ('commission_percentage', '40'),
   ('default_host_rate',     '10')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+
+-- -------------------------------------------------------------
+-- Promo codes (user-specific or general, single-use)
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS promo_codes (
+  id              INT            NOT NULL AUTO_INCREMENT,
+  promo_code      VARCHAR(50)    NOT NULL,
+  user_id         INT            NULL,
+  discount_value  DECIMAL(12,2)  NOT NULL,
+  expiry_date     DATETIME       NOT NULL,
+  is_used         TINYINT(1)     NOT NULL DEFAULT 0,
+  used_at         DATETIME       NULL,
+  created_at      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_promo_code (promo_code),
+  KEY idx_promo_user (user_id),
+  CONSTRAINT fk_promo_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Promo code redemption audit log
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS promo_code_redemptions (
+  id              INT            NOT NULL AUTO_INCREMENT,
+  promo_code_id   INT            NOT NULL,
+  user_id         INT            NOT NULL,
+  promo_code      VARCHAR(50)    NOT NULL,
+  discount_value  DECIMAL(12,2)  NOT NULL,
+  redeemed_at     DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_pcr_user (user_id),
+  KEY idx_pcr_code (promo_code_id),
+  CONSTRAINT fk_pcr_promo FOREIGN KEY (promo_code_id) REFERENCES promo_codes (id) ON DELETE CASCADE,
+  CONSTRAINT fk_pcr_user   FOREIGN KEY (user_id)       REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Host login access keys (long-lived session tokens for girls app)
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS host_access_keys (
+  id              INT            NOT NULL AUTO_INCREMENT,
+  user_id         INT            NOT NULL,
+  access_key      VARCHAR(255)   NOT NULL,
+  expires_at      DATETIME       NOT NULL,
+  profile_version INT            NOT NULL DEFAULT 1,
+  status          ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
+  created_at      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_hak_user (user_id),
+  UNIQUE KEY uq_hak_key  (access_key),
+  CONSTRAINT fk_hak_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

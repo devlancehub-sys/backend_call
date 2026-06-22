@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, Length, Matches, ValidateIf } from 'class-validator';
+import { IsInt, IsOptional, IsString, Length, Matches, Min, ValidateIf } from 'class-validator';
 
 export class HostLoginDto {
   @ApiProperty({ example: 'priya_host' })
@@ -43,4 +43,17 @@ export class CreateHostDto {
   @IsString()
   @Matches(/^[6-9]\d{9}$/, { message: 'Enter valid 10-digit phone' })
   phone?: string;
+}
+
+export class VerifyAccessKeyDto {
+  @ApiProperty({ example: 'hak_abc123...' })
+  @IsString()
+  @Length(10, 255)
+  access_key: string;
+
+  @ApiPropertyOptional({ example: 1, description: 'Cached profile version from the app' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  profile_version?: number;
 }

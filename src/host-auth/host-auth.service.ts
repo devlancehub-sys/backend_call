@@ -9,6 +9,8 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from '../auth/auth.service';
 import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
+import { HostAccessKeyService } from '../common/services/host-access-key.service';
+import { UsersService } from '../users/users.service';
 import { CreateHostDto, HostLoginDto } from './dto/host-auth.dto';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
@@ -20,6 +22,8 @@ export class HostAuthService {
     private db: DatabaseService,
     private auth: AuthService,
     private platformSettings: PlatformSettingsService,
+    private hostAccessKey: HostAccessKeyService,
+    private users: UsersService,
   ) {}
 
   async login(dto: HostLoginDto) {
@@ -60,6 +64,10 @@ export class HostAuthService {
         [user.id, tokens.refreshToken, dto.device_id || null, expiresAt, RECORD_STATUS.ACTIVE],
       );
 
+      const accessKeyData = await this.hostAccessKey.issueAccessKey(user.id);
+      const profileResult = await this.users.getProfile(user.id);
+      const profile = profileResult.data;
+
       return {
         success: true,
         data: {
@@ -70,6 +78,10 @@ export class HostAuthService {
             name: user.name,
             username: user.username,
           },
+          profile,
+          accessKey: accessKeyData.accessKey,
+          accessKeyExpiresAt: accessKeyData.expiresAt,
+          profileVersion: accessKeyData.profileVersion,
           ...tokens,
         },
       };
@@ -127,10 +139,19 @@ export class HostAuthService {
 
       await conn.commit();
 
+      const accessKeyData = await this.hostAccessKey.issueAccessKey(userId);
+
       return {
         success: true,
         message: 'Host account created. Share username & password with the host.',
-        data: { id: userId, username, name: dto.name, phone },
+        data: {
+          id: userId,
+          username,
+          name: dto.name,
+          phone,
+          accessKey: accessKeyData.accessKey,
+          accessKeyExpiresAt: accessKeyData.expiresAt,
+        },
       };
     } catch (err) {
       await conn.rollback();

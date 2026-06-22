@@ -98,6 +98,15 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     return rows.length > 0;
   }
 
+  /** Match FK column type to users.id (int vs bigint unsigned on older DBs). */
+  private async getUsersIdColumnType(): Promise<string> {
+    const rows = await this.query<any[]>(
+      `SELECT COLUMN_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'id'`,
+    );
+    return (rows[0]?.COLUMN_TYPE as string | undefined) ?? 'int';
+  }
+
   /** Run schema.sql when core tables are missing (e.g. fresh Railway database). */
   private async bootstrapSchemaIfNeeded() {
     const required = ['users', 'languages', 'wallets', 'refresh_tokens', 'calls'];
@@ -221,6 +230,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.ensureRecordStatusColumns();
+    await this.ensurePromoAndAccessKeyTables();
     void this.ensurePerformanceIndexes().catch((err) =>
       this.logger.warn(`Background index migration skipped: ${(err as Error)?.message || err}`),
     );
@@ -346,6 +356,64 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
          ENUM('pending','processing','completed','rejected') NOT NULL DEFAULT 'pending'`,
       );
       this.logger.log('Updated withdraw_requests.status enum');
+    }
+  }
+
+  /** Create promo_codes, promo_code_redemptions, host_access_keys on older databases. */
+  private async ensurePromoAndAccessKeyTables() {
+    const userIdType = await this.getUsersIdColumnType();
+
+    if (!(await this.hasTable('promo_codes'))) {
+      await this.query(`
+        CREATE TABLE promo_codes (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          promo_code VARCHAR(50) NOT NULL UNIQUE,
+          user_id ${userIdType} NULL,
+          discount_value DECIMAL(12,2) NOT NULL,
+          expiry_date DATETIME NOT NULL,
+          is_used TINYINT(1) NOT NULL DEFAULT 0,
+          used_at DATETIME NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          KEY idx_promo_user (user_id),
+          CONSTRAINT fk_promo_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+        )
+      `);
+      this.logger.log('Created promo_codes table');
+    }
+
+    if (!(await this.hasTable('promo_code_redemptions'))) {
+      await this.query(`
+        CREATE TABLE promo_code_redemptions (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          promo_code_id INT NOT NULL,
+          user_id ${userIdType} NOT NULL,
+          promo_code VARCHAR(50) NOT NULL,
+          discount_value DECIMAL(12,2) NOT NULL,
+          redeemed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          KEY idx_pcr_user (user_id),
+          KEY idx_pcr_code (promo_code_id),
+          CONSTRAINT fk_pcr_promo FOREIGN KEY (promo_code_id) REFERENCES promo_codes (id) ON DELETE CASCADE,
+          CONSTRAINT fk_pcr_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      `);
+      this.logger.log('Created promo_code_redemptions table');
+    }
+
+    if (!(await this.hasTable('host_access_keys'))) {
+      await this.query(`
+        CREATE TABLE host_access_keys (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          user_id ${userIdType} NOT NULL UNIQUE,
+          access_key VARCHAR(255) NOT NULL UNIQUE,
+          expires_at DATETIME NOT NULL,
+          profile_version INT NOT NULL DEFAULT 1,
+          status ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          CONSTRAINT fk_hak_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      `);
+      this.logger.log('Created host_access_keys table');
     }
   }
 }

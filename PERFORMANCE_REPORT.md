@@ -221,7 +221,7 @@ git push origin main
 After deploy, verify:
 
 ```bash
-curl https://backendcall-production.up.railway.app/api/health
+curl https://api.talkymate.in/api/health
 # → {"status":"ok","database":"ok"}
 ```
 

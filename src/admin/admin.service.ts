@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
+import { HostAccessKeyService } from '../common/services/host-access-key.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
@@ -8,6 +9,7 @@ export class AdminService {
   constructor(
     private db: DatabaseService,
     private platformSettings: PlatformSettingsService,
+    private hostAccessKey: HostAccessKeyService,
   ) {}
 
   async getDashboard() {
@@ -127,6 +129,9 @@ export class AdminService {
         RECORD_STATUS.INACTIVE,
         userId,
       ]);
+      await this.hostAccessKey.invalidateForUser(userId);
+    } else {
+      await this.hostAccessKey.bumpProfileVersion(userId);
     }
 
     return { success: true, message: `User status updated to ${status}` };
