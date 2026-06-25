@@ -20,9 +20,11 @@ import { PushModule } from './common/push.module';
 import { AppController } from './app.controller';
 
 @Module({
+  // This is the main module that will be used to bootstrap the application.
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 200 }]),
+    // DatabaseModule is used to connect to the database.
     DatabaseModule,
     AuthModule,
     UsersModule,
