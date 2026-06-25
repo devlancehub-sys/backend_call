@@ -9,10 +9,13 @@ export const calculateBilling = (
   ratePerMinute: number,
   commissionPct = DEFAULT_COMMISSION_PERCENTAGE,
 ) => {
-  const seconds = Math.max(0, Math.floor(durationSeconds));
+  const safeDuration = Number.isFinite(durationSeconds) ? durationSeconds : 0;
+  const safeRate = Number.isFinite(ratePerMinute) ? ratePerMinute : 0;
+  const safeCommission = Number.isFinite(commissionPct) ? commissionPct : DEFAULT_COMMISSION_PERCENTAGE;
+  const seconds = Math.max(0, Math.floor(safeDuration));
   const billableMinutes = seconds <= 0 ? 1 : Math.ceil(seconds / 60);
-  const totalAmount = billableMinutes * ratePerMinute;
-  const platformCommission = (totalAmount * commissionPct) / 100;
+  const totalAmount = billableMinutes * safeRate;
+  const platformCommission = (totalAmount * safeCommission) / 100;
   const hostEarning = totalAmount - platformCommission;
 
   return {

@@ -288,19 +288,29 @@ export class CallsService {
   async end(callId: number, userId: number) {
     this.clearRingTimeout(callId);
 
-    const calls = await this.db.query<any[]>(
-      `SELECT * FROM calls WHERE id = ? AND status = 'active'`,
-      [callId],
-    );
-    if (!calls.length) throw new NotFoundException('Active call not found');
+    const calls = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
+    if (!calls.length) throw new NotFoundException('Call not found');
 
     const call = calls[0];
     if (call.caller_id !== userId && call.host_id !== userId) {
       throw new ForbiddenException('You are not a participant in this call');
     }
 
-    const durationSeconds = Math.floor(
-      (Date.now() - new Date(call.started_at).getTime()) / 1000,
+    if (call.status === 'ended') {
+      return {
+        success: true,
+        data: this.buildEndPayload(call),
+      };
+    }
+
+    if (call.status !== 'active') {
+      throw new BadRequestException('Call is not active');
+    }
+
+    const startedAtMs = call.started_at ? new Date(call.started_at).getTime() : Date.now();
+    const durationSeconds = Math.max(
+      0,
+      Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
     );
     const commissionPct = this.platformSettings.getCommissionPercentage();
     const billing = calculateBilling(
@@ -318,6 +328,9 @@ export class CallsService {
         'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
         [call.caller_id, RECORD_STATUS.ACTIVE],
       );
+      if (!wallets.length) {
+        throw new BadRequestException('Caller wallet not found');
+      }
       const newBalance = Math.max(0, parseFloat(wallets[0].balance) - billing.totalAmount);
       await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [
         newBalance,
@@ -378,16 +391,13 @@ export class CallsService {
         this.logger.warn(`daily task evaluate failed: ${(err as Error)?.message}`);
       }
 
-      const endPayload = {
-        call_id: call.id,
-        duration_seconds: durationSeconds,
-        billable_minutes: billing.billableMinutes,
-        rate_per_minute: parseFloat(call.rate_per_minute),
-        amount_deducted: billing.totalAmount,
-        host_earning: billing.hostEarning,
-        platform_commission: billing.platformCommission,
-        paid_by: 'caller' as const,
-      };
+      const endPayload = this.buildEndPayload(call, {
+        durationSeconds,
+        billableMinutes: billing.billableMinutes,
+        totalAmount: billing.totalAmount,
+        hostEarning: billing.hostEarning,
+        platformCommission: billing.platformCommission,
+      });
 
       this.socket.notifyUser(call.caller_id, 'wallet_updated', {
         user_id: call.caller_id,
@@ -514,6 +524,39 @@ export class CallsService {
 
   private createRoomId(): string {
     return `call_${uuidv4()}`;
+  }
+
+  private buildEndPayload(
+    call: any,
+    billing?: {
+      durationSeconds: number;
+      billableMinutes: number;
+      totalAmount: number;
+      hostEarning: number;
+      platformCommission: number;
+    },
+  ) {
+    const durationSeconds =
+      billing?.durationSeconds ?? Math.max(0, parseInt(String(call.duration_seconds ?? 0), 10));
+    const ratePerMinute = parseFloat(call.rate_per_minute);
+    const amountDeducted = billing?.totalAmount ?? parseFloat(call.amount_deducted ?? 0);
+    const hostEarning = billing?.hostEarning ?? parseFloat(call.host_earning ?? 0);
+    const platformCommission =
+      billing?.platformCommission ?? parseFloat(call.platform_commission ?? 0);
+    const billableMinutes =
+      billing?.billableMinutes ??
+      (durationSeconds <= 0 ? 1 : Math.ceil(durationSeconds / 60));
+
+    return {
+      call_id: call.id,
+      duration_seconds: durationSeconds,
+      billable_minutes: billableMinutes,
+      rate_per_minute: ratePerMinute,
+      amount_deducted: amountDeducted,
+      host_earning: hostEarning,
+      platform_commission: platformCommission,
+      paid_by: 'caller' as const,
+    };
   }
 
   private buildCallPayload(params: {
