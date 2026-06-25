@@ -241,9 +241,17 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Voice call could not start. ZEGOCLOUD token error.');
     }
 
-    await this.db.query(`UPDATE calls SET status = 'active', started_at = NOW() WHERE id = ?`, [
-      callId,
-    ]);
+    await this.db.query(
+      `UPDATE calls SET status = 'active', started_at = NOW() WHERE id = ? AND status = 'ringing'`,
+      [callId],
+    );
+    const activeRows = await this.db.query<any[]>(
+      `SELECT id FROM calls WHERE id = ? AND status = 'active'`,
+      [callId],
+    );
+    if (!activeRows.length) {
+      throw new NotFoundException('Call not found or already handled');
+    }
 
     this.presence.markUsersInCall(call.caller_id, call.host_id);
 
@@ -288,9 +296,17 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('You are not a participant in this call');
     }
 
-    await this.db.query(`UPDATE calls SET status = 'rejected', ended_at = NOW() WHERE id = ?`, [
-      callId,
-    ]);
+    await this.db.query(
+      `UPDATE calls SET status = 'rejected', ended_at = NOW() WHERE id = ? AND status = 'ringing'`,
+      [callId],
+    );
+    const rejectedRows = await this.db.query<any[]>(
+      `SELECT id FROM calls WHERE id = ? AND status = 'rejected'`,
+      [callId],
+    );
+    if (!rejectedRows.length) {
+      throw new NotFoundException('Call not found or already handled');
+    }
 
     const otherId = userId === call.caller_id ? call.host_id : call.caller_id;
     this.socket.notifyUser(otherId, 'call_rejected', { call_id: callId });
@@ -302,41 +318,45 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   async end(callId: number, userId: number) {
     this.clearRingTimeout(callId);
 
-    const calls = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
-    if (!calls.length) throw new NotFoundException('Call not found');
-
-    const call = calls[0];
-    if (call.caller_id !== userId && call.host_id !== userId) {
-      throw new ForbiddenException('You are not a participant in this call');
-    }
-
-    if (call.status === 'ended') {
-      return {
-        success: true,
-        data: this.buildEndPayload(call),
-      };
-    }
-
-    if (call.status !== 'active') {
-      throw new BadRequestException('Call is not active');
-    }
-
-    const startedAtMs = call.started_at ? new Date(call.started_at).getTime() : Date.now();
-    const durationSeconds = Math.max(
-      0,
-      Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
-    );
-    const commissionPct = this.platformSettings.getCommissionPercentage();
-    const billing = calculateBilling(
-      durationSeconds,
-      parseFloat(call.rate_per_minute),
-      commissionPct,
-    );
-
     const pool = this.db.getPool();
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
+
+      const [calls] = await conn.query<any[]>(
+        `SELECT * FROM calls WHERE id = ? FOR UPDATE`,
+        [callId],
+      );
+      if (!calls.length) throw new NotFoundException('Call not found');
+
+      const call = calls[0];
+      if (call.caller_id !== userId && call.host_id !== userId) {
+        throw new ForbiddenException('You are not a participant in this call');
+      }
+
+      if (call.status === 'ended') {
+        await conn.commit();
+        return {
+          success: true,
+          data: this.buildEndPayload(call),
+        };
+      }
+
+      if (call.status !== 'active') {
+        throw new BadRequestException('Call is not active');
+      }
+
+      const startedAtMs = call.started_at ? new Date(call.started_at).getTime() : Date.now();
+      const durationSeconds = Math.max(
+        0,
+        Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
+      );
+      const commissionPct = this.platformSettings.getCommissionPercentage();
+      const billing = calculateBilling(
+        durationSeconds,
+        parseFloat(call.rate_per_minute),
+        commissionPct,
+      );
 
       const [wallets] = await conn.query<any[]>(
         'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
@@ -357,9 +377,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         [call.caller_id, -billing.totalAmount, newBalance, `Call #${call.id}`],
       );
 
-      await conn.query(
+      const [updateResult] = await conn.query<any>(
         `UPDATE calls SET status = 'ended', ended_at = NOW(), duration_seconds = ?,
-         amount_deducted = ?, host_earning = ?, platform_commission = ? WHERE id = ?`,
+         amount_deducted = ?, host_earning = ?, platform_commission = ? WHERE id = ? AND status = 'active'`,
         [
           durationSeconds,
           billing.totalAmount,
@@ -368,6 +388,15 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
           call.id,
         ],
       );
+
+      if (!(updateResult as { affectedRows?: number })?.affectedRows) {
+        await conn.rollback();
+        const endedRows = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
+        if (endedRows[0]?.status === 'ended') {
+          return { success: true, data: this.buildEndPayload(endedRows[0]) };
+        }
+        throw new BadRequestException('Call is not active');
+      }
 
       await conn.query(
         `INSERT INTO call_logs (call_id, caller_id, host_id, duration_seconds, amount_deducted, host_earning, status)
@@ -503,7 +532,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         if (!rows.length || rows[0].status !== 'ringing') return;
 
         await this.db.query(
-          `UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`,
+          `UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ? AND status = 'ringing'`,
           [callId],
         );
 
