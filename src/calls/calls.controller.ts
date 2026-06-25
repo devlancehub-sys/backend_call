@@ -37,7 +37,7 @@ export class CallsController {
   }
 
   @Post(':id/reject')
-  @ApiOperation({ summary: 'Reject incoming call' })
+  @ApiOperation({ summary: 'Reject or cancel a ringing call' })
   @ApiParam({ name: 'id', example: 42 })
   reject(@Req() req: any, @Param('id') id: string) {
     return this.callsService.reject(+id, req.user.id, req.user.role);

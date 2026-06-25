@@ -274,7 +274,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async reject(callId: number, userId: number, role: string) {
+  async reject(callId: number, userId: number, _role: string) {
     this.clearRingTimeout(callId);
 
     const calls = await this.db.query<any[]>(
@@ -284,21 +284,16 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     if (!calls.length) throw new NotFoundException('Call not found');
 
     const call = calls[0];
-    const initiatedBy = call.initiated_by || 'male';
-
-    if (initiatedBy === 'male' && (role !== 'female' || call.host_id !== userId)) {
-      throw new ForbiddenException('Only the host can reject this call');
-    }
-    if (initiatedBy === 'female' && (role !== 'male' || call.caller_id !== userId)) {
-      throw new ForbiddenException('Only the user can reject this call');
+    if (call.caller_id !== userId && call.host_id !== userId) {
+      throw new ForbiddenException('You are not a participant in this call');
     }
 
     await this.db.query(`UPDATE calls SET status = 'rejected', ended_at = NOW() WHERE id = ?`, [
       callId,
     ]);
 
-    const notifyId = initiatedBy === 'male' ? call.caller_id : call.host_id;
-    this.socket.notifyUser(notifyId, 'call_rejected', { call_id: callId });
+    const otherId = userId === call.caller_id ? call.host_id : call.caller_id;
+    this.socket.notifyUser(otherId, 'call_rejected', { call_id: callId });
 
     return { success: true, message: 'Call rejected' };
   }
