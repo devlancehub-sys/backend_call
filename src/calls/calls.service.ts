@@ -74,6 +74,8 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('You are already on a call');
     }
 
+    await this.assertHostReachable(hostId);
+
     const hosts = await this.db.query<any[]>(
       `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls, fh.host_status
        FROM users u
@@ -121,6 +123,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     const pushSent = await this.push.sendIncomingCall(hostId, payload);
 
     if (!socketDelivered && !pushSent) {
+      this.logger.warn(
+        `Call ${callId} delivery failed for host ${hostId}: socket=${socketDelivered}, push=${pushSent}`,
+      );
       await this.db.query(`UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`, [
         callId,
       ]);
@@ -694,6 +699,29 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('Call blocked — ZEGOCLOUD_APP_ID / ZEGOCLOUD_SERVER_SECRET missing');
       throw new BadRequestException(
         'Voice calls are unavailable. ZEGOCLOUD is not configured on the server.',
+      );
+    }
+  }
+
+  /** Socket must be live, or FCM must be able to wake the host app. */
+  private async assertHostReachable(hostId: number) {
+    const socketOnline = this.socket.isUserOnline(hostId);
+    if (socketOnline) return;
+
+    const rows = await this.db.query<any[]>(
+      'SELECT fcm_token FROM users WHERE id = ? LIMIT 1',
+      [hostId],
+    );
+    const hasFcmToken = Boolean(rows[0]?.fcm_token);
+    const pushReady = this.push.isConfigured;
+
+    this.logger.warn(
+      `Host ${hostId} offline on socket (fcm_token=${hasFcmToken}, push=${pushReady})`,
+    );
+
+    if (!pushReady || !hasFcmToken) {
+      throw new BadRequestException(
+        'Host is not reachable. Ask host to open the app and turn Available ON.',
       );
     }
   }

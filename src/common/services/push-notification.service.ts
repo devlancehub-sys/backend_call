@@ -36,6 +36,10 @@ export class PushNotificationService implements OnModuleInit {
     this.logger.warn('Push notifications disabled — configure FCM v1 credentials');
   }
 
+  get isConfigured(): boolean {
+    return Boolean(this.fcmV1?.isConfigured || this.config.get<string>('FIREBASE_SERVER_KEY'));
+  }
+
   async sendToUser(
     userId: number,
     title: string,
