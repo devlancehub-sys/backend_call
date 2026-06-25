@@ -11,3 +11,6 @@ import { AdminService } from './admin.service';
   providers: [AdminService],
 })
 export class AdminModule {}
+// This module is used to manage the admin panel.
+// It is used to manage the admin panel.
+// It is used to manage the admin panel.
