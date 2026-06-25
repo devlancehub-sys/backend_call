@@ -57,3 +57,39 @@ export class VerifyAccessKeyDto {
   @Min(0)
   profile_version?: number;
 }
+
+export class SendHostOtpDto {
+  @ApiProperty({ example: '9876543210' })
+  @IsString()
+  @Matches(/^[6-9]\d{9}$/, { message: 'Enter valid 10-digit mobile number' })
+  phone: string;
+}
+
+export class VerifyHostOtpDto {
+  @ApiProperty({ example: '9876543210' })
+  @IsString()
+  @Matches(/^[6-9]\d{9}$/, { message: 'Enter valid 10-digit mobile number' })
+  phone: string;
+
+  @ApiProperty({ example: '123456' })
+  @IsString()
+  @Length(4, 8)
+  otp: string;
+
+  @ApiPropertyOptional({ example: 'device-uuid-abc123' })
+  @IsOptional()
+  @IsString()
+  device_id?: string;
+
+  @ApiPropertyOptional({ example: 'fcm-token-xyz' })
+  @IsOptional()
+  @IsString()
+  fcm_token?: string;
+}
+
+export class SetHostAvailabilityDto {
+  @ApiProperty({ enum: ['available', 'busy', 'offline'] })
+  @IsString()
+  @Matches(/^(available|busy|offline)$/)
+  status: 'available' | 'busy' | 'offline';
+}

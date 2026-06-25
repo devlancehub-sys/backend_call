@@ -8,6 +8,8 @@ type EarningsSummaryData = {
   monthly_earnings: number;
   total_earnings: number;
   withdraw_balance: number;
+  calls_today: number;
+  wallet_balance: number;
 };
 
 @Injectable()
@@ -23,6 +25,8 @@ export class EarningsService {
       monthly_earnings: 0,
       total_earnings: 0,
       withdraw_balance: 0,
+      calls_today: 0,
+      wallet_balance: 0,
     };
   }
 
@@ -42,7 +46,7 @@ export class EarningsService {
 
   async getSummary(hostId: number) {
     try {
-      const [summaryRows, withdrawnRows] = await Promise.all([
+      const [summaryRows, withdrawnRows, callsTodayRows, walletRows] = await Promise.all([
         this.db.query<any[]>(
           `SELECT
              COALESCE(SUM(CASE
@@ -64,10 +68,21 @@ export class EarningsService {
            WHERE host_id = ? AND status IN ('pending', 'processing', 'completed')`,
           [hostId],
         ),
+        this.db.query<any[]>(
+          `SELECT COUNT(*) AS calls_today FROM calls
+           WHERE host_id = ? AND DATE(created_at) = CURDATE()`,
+          [hostId],
+        ),
+        this.db.query<any[]>(
+          `SELECT COALESCE(balance, 0) AS balance FROM wallets WHERE user_id = ? AND status = ?`,
+          [hostId, RECORD_STATUS.ACTIVE],
+        ),
       ]);
 
       const summaryRow = this.firstRow(summaryRows);
       const withdrawnRow = this.firstRow(withdrawnRows);
+      const callsTodayRow = this.firstRow(callsTodayRows);
+      const walletRow = this.firstRow(walletRows);
 
       const totalEarnings = this.toAmount(summaryRow?.total_earnings);
       const withdrawnAmount = this.toAmount(withdrawnRow?.withdrawn);
@@ -78,6 +93,8 @@ export class EarningsService {
         monthly_earnings: this.toAmount(summaryRow?.monthly_earnings),
         total_earnings: totalEarnings,
         withdraw_balance: Math.max(0, totalEarnings - withdrawnAmount),
+        calls_today: Number(callsTodayRow?.calls_today ?? 0),
+        wallet_balance: this.toAmount(walletRow?.balance),
       };
 
       return { success: true, data };

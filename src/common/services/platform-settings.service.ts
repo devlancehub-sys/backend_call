@@ -45,4 +45,20 @@ export class PlatformSettingsService implements OnModuleInit {
   getDefaultHostRate(): number {
     return this.getNumber('default_host_rate', 'DEFAULT_HOST_RATE', 10);
   }
+
+  getDailyMinCalls(): number {
+    return this.getNumber('daily_min_calls', 'DAILY_MIN_CALLS', 6);
+  }
+
+  getDailyMinMinutes(): number {
+    return this.getNumber('daily_min_minutes', 'DAILY_MIN_MINUTES', 60);
+  }
+
+  getDailyTaskReward(): number {
+    return this.getNumber('daily_task_reward', 'DAILY_TASK_REWARD', 50);
+  }
+
+  getWeeklyTaskBonus(): number {
+    return this.getNumber('weekly_task_bonus', 'WEEKLY_TASK_BONUS', 200);
+  }
 }

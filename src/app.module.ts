@@ -16,6 +16,7 @@ import { AdminModule } from './admin/admin.module';
 import { SocketModule } from './socket/socket.module';
 import { HostAuthModule } from './host-auth/host-auth.module';
 import { PromoCodesModule } from './promo-codes/promo-codes.module';
+import { PushModule } from './common/push.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -36,6 +37,7 @@ import { AppController } from './app.controller';
     SocketModule,
     HostAuthModule,
     PromoCodesModule,
+    PushModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

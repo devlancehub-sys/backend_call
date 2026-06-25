@@ -141,6 +141,10 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     return this.presence.emitToUser(userId, event, data);
   }
 
+  notifyRole(role: 'male' | 'female', event: string, data: Record<string, unknown>): void {
+    this.server.to(`role:${role}`).emit(event, data);
+  }
+
   isUserOnline(userId: number): boolean {
     return this.presence.isUserOnline(userId);
   }

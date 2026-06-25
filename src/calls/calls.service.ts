@@ -17,6 +17,9 @@ import {
 } from '../common/utils/rate-tier.util';
 import { ZegoTokenService } from '../zego/zego-token.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
+import { PushNotificationService } from '../common/services/push-notification.service';
+import { HostAvailabilityService } from '../host-auth/host-availability.service';
+import { HostDailyTaskService } from '../host-auth/host-daily-task.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 const RING_TIMEOUT_MS = 45_000;
@@ -33,15 +36,16 @@ export class CallsService {
     private presence: OnlineUserManagerService,
     private zegoToken: ZegoTokenService,
     private platformSettings: PlatformSettingsService,
+    private push: PushNotificationService,
+    private hostAvailability: HostAvailabilityService,
+    private hostDailyTask: HostDailyTaskService,
   ) {}
 
   /** Boy calls girl — money always deducted from boy (caller_id) */
   async initiate(callerId: number, hostId: number) {
     this.ensureZegoConfigured();
 
-    if (!this.socket.isUserOnline(hostId)) {
-      throw new BadRequestException('User is offline');
-    }
+    await this.hostAvailability.assertCanReceiveCalls(hostId);
 
     if (this.presence.isUserInCall(hostId)) {
       throw new BadRequestException('User is busy on another call');
@@ -52,7 +56,7 @@ export class CallsService {
     }
 
     const hosts = await this.db.query<any[]>(
-      `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls
+      `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls, fh.host_status
        FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
        WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
@@ -94,12 +98,14 @@ export class CallsService {
       callerAvatarUrl: callers[0]?.avatar_url,
     });
 
-    const delivered = this.socket.notifyUser(hostId, 'incoming_call', payload);
-    if (!delivered) {
+    const socketDelivered = this.socket.notifyUser(hostId, 'incoming_call', payload);
+    const pushSent = await this.push.sendIncomingCall(hostId, payload);
+
+    if (!socketDelivered && !pushSent) {
       await this.db.query(`UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`, [
         callId,
       ]);
-      throw new BadRequestException('User is offline');
+      throw new BadRequestException('Host is not reachable');
     }
 
     this.scheduleMissedCallTimeout(callId, callerId, hostId, 'male');
@@ -221,6 +227,11 @@ export class CallsService {
     ]);
 
     this.presence.markUsersInCall(call.caller_id, call.host_id);
+
+    if (role === 'female') {
+      await this.hostAvailability.resetMissedOnAnswer(call.host_id);
+      await this.hostAvailability.onCallAccepted(call.host_id);
+    }
 
     this.socket.notifyUser(notifyId, 'call_accepted', {
       call_id: callId,
@@ -359,6 +370,13 @@ export class CallsService {
       await conn.commit();
 
       this.presence.clearUsersInCall(call.caller_id, call.host_id);
+      await this.hostAvailability.onCallEnded(call.host_id);
+
+      try {
+        await this.hostDailyTask.evaluateAfterCall(call.host_id);
+      } catch (err) {
+        this.logger.warn(`daily task evaluate failed: ${(err as Error)?.message}`);
+      }
 
       const endPayload = {
         call_id: call.id,
@@ -476,6 +494,10 @@ export class CallsService {
           call_id: callId,
           reason: 'missed',
         });
+
+        if (initiatedBy === 'male') {
+          await this.hostAvailability.recordMissedIncomingCall(hostId);
+        }
       } catch (err) {
         this.logger.warn(`missed call timeout failed for #${callId}: ${(err as Error)?.message}`);
       }

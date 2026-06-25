@@ -230,6 +230,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.ensureRecordStatusColumns();
+    await this.ensureHostAvailabilityColumns();
+    await this.ensureHostDailyTaskColumns();
+    await this.ensureHostOtpTable();
     await this.ensurePromoAndAccessKeyTables();
     void this.ensurePerformanceIndexes().catch((err) =>
       this.logger.warn(`Background index migration skipped: ${(err as Error)?.message || err}`),
@@ -360,6 +363,136 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Create promo_codes, promo_code_redemptions, host_access_keys on older databases. */
+  private async ensureHostAvailabilityColumns() {
+    if (!(await this.hasTable('female_hosts'))) return;
+
+    if (!(await this.hasColumn('female_hosts', 'host_status'))) {
+      await this.query(
+        `ALTER TABLE female_hosts ADD COLUMN host_status ENUM('offline','available','busy') NOT NULL DEFAULT 'offline'`,
+      );
+      this.logger.log('Added female_hosts.host_status column');
+    }
+
+    if (!(await this.hasColumn('female_hosts', 'consecutive_missed_calls'))) {
+      await this.query(
+        `ALTER TABLE female_hosts ADD COLUMN consecutive_missed_calls INT NOT NULL DEFAULT 0`,
+      );
+      this.logger.log('Added female_hosts.consecutive_missed_calls column');
+    }
+
+    if (!(await this.hasColumn('female_hosts', 'available_since'))) {
+      await this.query(`ALTER TABLE female_hosts ADD COLUMN available_since DATETIME NULL`);
+      this.logger.log('Added female_hosts.available_since column');
+    }
+  }
+
+  private async ensureHostDailyTaskColumns() {
+    if (!(await this.hasTable('female_hosts'))) return;
+
+    if (!(await this.hasColumn('female_hosts', 'earning_status'))) {
+      await this.query(
+        `ALTER TABLE female_hosts ADD COLUMN earning_status ENUM('inactive','active') NOT NULL DEFAULT 'inactive'`,
+      );
+      this.logger.log('Added female_hosts.earning_status column');
+    }
+
+    if (!(await this.hasColumn('female_hosts', 'streak_count'))) {
+      await this.query(`ALTER TABLE female_hosts ADD COLUMN streak_count INT NOT NULL DEFAULT 0`);
+      this.logger.log('Added female_hosts.streak_count column');
+    }
+
+    if (!(await this.hasColumn('female_hosts', 'last_task_eval_date'))) {
+      await this.query(`ALTER TABLE female_hosts ADD COLUMN last_task_eval_date DATE NULL`);
+      this.logger.log('Added female_hosts.last_task_eval_date column');
+    }
+
+    const userIdType = await this.getUsersIdColumnType();
+
+    if (!(await this.hasTable('host_daily_tasks'))) {
+      await this.query(`
+        CREATE TABLE host_daily_tasks (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          host_id ${userIdType} NOT NULL,
+          task_date DATE NOT NULL,
+          completed_calls INT NOT NULL DEFAULT 0,
+          completed_minutes INT NOT NULL DEFAULT 0,
+          target_met TINYINT(1) NOT NULL DEFAULT 0,
+          reward_claimed TINYINT(1) NOT NULL DEFAULT 0,
+          reward_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_host_task_date (host_id, task_date),
+          CONSTRAINT fk_hdt_host FOREIGN KEY (host_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      `);
+      this.logger.log('Created host_daily_tasks table');
+    }
+
+    await this.ensureDailyTaskPlatformSettings();
+    await this.ensureHostWeeklyBonusTable();
+  }
+
+  private async ensureHostWeeklyBonusTable() {
+    const userIdType = await this.getUsersIdColumnType();
+
+    if (!(await this.hasTable('host_weekly_bonuses'))) {
+      await this.query(`
+        CREATE TABLE host_weekly_bonuses (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          host_id ${userIdType} NOT NULL,
+          week_start DATE NOT NULL,
+          days_completed INT NOT NULL DEFAULT 0,
+          bonus_granted TINYINT(1) NOT NULL DEFAULT 0,
+          bonus_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE KEY uq_host_week (host_id, week_start),
+          CONSTRAINT fk_hwb_host FOREIGN KEY (host_id) REFERENCES users (id) ON DELETE CASCADE
+        )
+      `);
+      this.logger.log('Created host_weekly_bonuses table');
+    }
+  }
+
+  private async ensureDailyTaskPlatformSettings() {
+    if (!(await this.hasTable('platform_settings'))) return;
+
+    const defaults: Array<[string, string]> = [
+      ['daily_min_calls', '6'],
+      ['daily_min_minutes', '60'],
+      ['daily_task_reward', '50'],
+      ['weekly_task_bonus', '200'],
+    ];
+
+    for (const [key, value] of defaults) {
+      const rows = await this.query<any[]>(
+        'SELECT setting_key FROM platform_settings WHERE setting_key = ?',
+        [key],
+      );
+      if (!rows.length) {
+        await this.query(
+          'INSERT INTO platform_settings (setting_key, setting_value) VALUES (?, ?)',
+          [key, value],
+        );
+        this.logger.log(`Seeded platform_settings.${key}`);
+      }
+    }
+  }
+
+  private async ensureHostOtpTable() {
+    if (!(await this.hasTable('host_otp_codes'))) {
+      await this.query(`
+        CREATE TABLE host_otp_codes (
+          phone VARCHAR(15) NOT NULL PRIMARY KEY,
+          otp VARCHAR(8) NOT NULL,
+          expires_at DATETIME NOT NULL,
+          attempts INT NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      this.logger.log('Created host_otp_codes table');
+    }
+  }
+
   private async ensurePromoAndAccessKeyTables() {
     const userIdType = await this.getUsersIdColumnType();
 

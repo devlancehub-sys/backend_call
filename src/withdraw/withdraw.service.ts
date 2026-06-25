@@ -19,6 +19,17 @@ export class WithdrawService {
       throw new BadRequestException('Minimum withdraw is ₹100');
     }
 
+    const hostRows = await this.db.query<any[]>(
+      `SELECT earning_status FROM female_hosts WHERE user_id = ?`,
+      [hostId],
+    );
+    const earningStatus = hostRows[0]?.earning_status ?? 'inactive';
+    if (earningStatus !== 'active') {
+      throw new BadRequestException(
+        'Complete today\'s daily task (6 calls or 60 minutes) to unlock withdrawals',
+      );
+    }
+
     const [balanceRow] = await this.db.query<any[]>(
       `SELECT
          COALESCE((SELECT SUM(amount) FROM earnings WHERE host_id = ? AND status = ?), 0) AS total,
