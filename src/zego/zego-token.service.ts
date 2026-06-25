@@ -34,13 +34,19 @@ export class ZegoTokenService {
       },
     });
 
-    return generateToken04(
-      this.appId,
-      String(userId),
-      secret,
-      this.tokenTtlSeconds,
-      payload,
-    );
+    try {
+      return generateToken04(
+        this.appId,
+        String(userId),
+        secret,
+        this.tokenTtlSeconds,
+        payload,
+      );
+    } catch (err: unknown) {
+      const info = err as { errorMessage?: string; message?: string };
+      const detail = info?.errorMessage || info?.message || 'token error';
+      throw new BadRequestException(`Voice call could not start. ZEGOCLOUD ${detail}`);
+    }
   }
 
   publicAppConfig() {

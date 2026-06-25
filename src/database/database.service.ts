@@ -389,13 +389,28 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
   private async ensureCallsRoomIdColumn() {
     if (!(await this.hasTable('calls'))) return;
+    if (await this.hasColumn('calls', 'room_id')) return;
 
-    if (!(await this.hasColumn('calls', 'room_id'))) {
+    const legacy = await this.query<Array<{ name: string }>>(
+      `SELECT COLUMN_NAME AS name FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'calls'
+         AND COLUMN_NAME LIKE '%channel%' AND COLUMN_NAME <> 'room_id'
+       LIMIT 1`,
+    );
+
+    if (legacy.length) {
+      const col = legacy[0].name;
       await this.query(
-        `ALTER TABLE calls ADD COLUMN room_id VARCHAR(255) NOT NULL DEFAULT ''`,
+        `ALTER TABLE calls CHANGE COLUMN \`${col}\` room_id VARCHAR(255) NOT NULL`,
       );
-      this.logger.log('Added calls.room_id column');
+      this.logger.log('Migrated calls voice room column to room_id');
+      return;
     }
+
+    await this.query(
+      `ALTER TABLE calls ADD COLUMN room_id VARCHAR(255) NOT NULL DEFAULT ''`,
+    );
+    this.logger.log('Added calls.room_id column');
   }
 
   private async ensureHostDailyTaskColumns() {
