@@ -76,4 +76,11 @@ export class AdminController {
   purgeUserData() {
     return this.adminService.purgeAllUserData();
   }
+
+  @Post('data/clear-calls-sessions')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Delete all calls and disconnect all socket sessions' })
+  clearCallsAndSessions() {
+    return this.adminService.clearAllCallsAndSessions();
+  }
 }

@@ -3,6 +3,7 @@ import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { HostAccessKeyService } from '../common/services/host-access-key.service';
 import { OnlineUserManagerService } from '../socket/online-user-manager.service';
+import { CallsService } from '../calls/calls.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
@@ -14,6 +15,7 @@ export class AdminService {
     private platformSettings: PlatformSettingsService,
     private hostAccessKey: HostAccessKeyService,
     private presence: OnlineUserManagerService,
+    private callsService: CallsService,
   ) {}
 
   async getDashboard() {
@@ -199,5 +201,9 @@ export class AdminService {
       [table],
     );
     return rows.length > 0;
+  }
+
+  clearAllCallsAndSessions() {
+    return this.callsService.adminClearAllCallsAndSessions();
   }
 }

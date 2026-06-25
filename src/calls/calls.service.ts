@@ -541,6 +541,73 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     this.ringTimeouts.delete(callId);
   }
 
+  async adminClearAllCallsAndSessions() {
+    for (const callId of [...this.ringTimeouts.keys()]) {
+      this.clearRingTimeout(callId);
+    }
+
+    const [[countRow]] = await this.db.getPool().query<any[]>(
+      'SELECT COUNT(*) as total FROM calls',
+    );
+    const deletedCalls = Number(countRow?.total ?? 0);
+    const socketStats = this.presence.getStats();
+
+    const pool = this.db.getPool();
+    const conn = await pool.getConnection();
+
+    try {
+      await conn.beginTransaction();
+      await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+
+      if (await this.hasTable('call_logs')) {
+        await conn.query('TRUNCATE TABLE call_logs');
+      }
+      if (await this.hasTable('earnings')) {
+        await conn.query('DELETE FROM earnings WHERE call_id IS NOT NULL');
+      }
+      await conn.query('TRUNCATE TABLE calls');
+
+      await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+
+      await conn.query(
+        `UPDATE female_hosts
+         SET host_status = 'offline', consecutive_missed_calls = 0
+         WHERE host_status != 'offline'`,
+      );
+      await conn.query(`UPDATE users SET is_online = 0 WHERE role != 'admin'`);
+
+      await conn.commit();
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
+    }
+
+    this.presence.clearAllSessions();
+    this.logger.warn(
+      `Admin cleared ${deletedCalls} calls and ${socketStats.activeConnections} socket sessions`,
+    );
+
+    return {
+      success: true,
+      message: 'All calls deleted and socket sessions cleared.',
+      data: {
+        deleted_calls: deletedCalls,
+        disconnected_sockets: socketStats.activeConnections,
+      },
+    };
+  }
+
+  private async hasTable(table: string): Promise<boolean> {
+    const rows = await this.db.query<any[]>(
+      `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [table],
+    );
+    return rows.length > 0;
+  }
+
   private createRoomId(): string {
     return `call_${uuidv4()}`;
   }
