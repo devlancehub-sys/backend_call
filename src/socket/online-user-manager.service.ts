@@ -364,4 +364,27 @@ export class OnlineUserManagerService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log('Online user manager destroyed — all sessions cleared');
   }
+
+  clearAllSessions() {
+    if (this.staleSweepTimer) {
+      clearInterval(this.staleSweepTimer);
+      this.staleSweepTimer = null;
+    }
+
+    for (const timer of this.offlineTimers.values()) clearTimeout(timer);
+    for (const timer of this.dbSyncTimers.values()) clearTimeout(timer);
+    this.offlineTimers.clear();
+    this.dbSyncTimers.clear();
+
+    for (const socketId of [...this.socketIndex.keys()]) {
+      this.disconnectSocket(socketId, 'admin_purge');
+    }
+
+    this.sessions.clear();
+    this.socketIndex.clear();
+    this.inCallUsers.clear();
+    this.startStaleSweep();
+
+    this.logger.warn('All socket sessions cleared by admin purge');
+  }
 }

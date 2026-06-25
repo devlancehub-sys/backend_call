@@ -1,8 +1,8 @@
-import { Controller, Get, Put, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, HttpCode } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { AdminApiKeyGuard } from '../common/guards/admin-api-key.guard';
-import { UpdateSettingsDto, UpdateUserStatusDto } from './dto/admin.dto';
+import { UpdateSettingsDto, UpdateUserStatusDto, PurgeUserDataDto } from './dto/admin.dto';
 
 @ApiTags('Admin')
 @ApiSecurity('admin-key')
@@ -66,5 +66,14 @@ export class AdminController {
   @ApiParam({ name: 'id', example: 12 })
   updateUserStatus(@Param('id') id: string, @Body() body: UpdateUserStatusDto) {
     return this.adminService.updateUserStatus(+id, body.status);
+  }
+
+  @Post('data/purge-users')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Delete all user data — keeps admin accounts, languages, and platform settings',
+  })
+  purgeUserData(@Body() body: PurgeUserDataDto) {
+    return this.adminService.purgeAllUserData();
   }
 }

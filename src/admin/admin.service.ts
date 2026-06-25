@@ -1,15 +1,19 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { HostAccessKeyService } from '../common/services/host-access-key.service';
+import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
 export class AdminService {
+  private readonly logger = new Logger(AdminService.name);
+
   constructor(
     private db: DatabaseService,
     private platformSettings: PlatformSettingsService,
     private hostAccessKey: HostAccessKeyService,
+    private presence: OnlineUserManagerService,
   ) {}
 
   async getDashboard() {
@@ -135,5 +139,65 @@ export class AdminService {
     }
 
     return { success: true, message: `User status updated to ${status}` };
+  }
+
+  async purgeAllUserData() {
+    const pool = this.db.getPool();
+    const conn = await pool.getConnection();
+    const clearedTables: string[] = [];
+
+    try {
+      await conn.beginTransaction();
+
+      const [[countRow]] = await conn.query<any[]>(
+        'SELECT COUNT(*) as total FROM users WHERE role != ?',
+        ['admin'],
+      );
+      const deletedUsers = Number(countRow?.total ?? 0);
+
+      const optionalTables = ['host_otp_codes', 'notifications', 'admin_audit_logs'];
+      for (const table of optionalTables) {
+        if (await this.tableExists(table)) {
+          await conn.query(`TRUNCATE TABLE \`${table}\``);
+          clearedTables.push(table);
+        }
+      }
+
+      if (await this.tableExists('promo_codes')) {
+        await conn.query('DELETE FROM promo_codes');
+        clearedTables.push('promo_codes', 'promo_code_redemptions');
+      }
+
+      await conn.query('DELETE FROM users WHERE role != ?', ['admin']);
+      clearedTables.push('users (non-admin + related records)');
+
+      await conn.commit();
+
+      this.presence.clearAllSessions();
+      this.logger.warn(`Purged all user data — deleted ${deletedUsers} non-admin users`);
+
+      return {
+        success: true,
+        message: 'All user data deleted. Admin accounts and platform settings kept.',
+        data: {
+          deleted_users: deletedUsers,
+          cleared_tables: clearedTables,
+        },
+      };
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
+    }
+  }
+
+  private async tableExists(table: string): Promise<boolean> {
+    const rows = await this.db.query<any[]>(
+      `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [table],
+    );
+    return rows.length > 0;
   }
 }
