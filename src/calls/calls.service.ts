@@ -50,6 +50,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       this.cleanupStaleActiveCalls().catch((err) =>
         this.logger.warn(`stale call janitor failed: ${(err as Error)?.message}`),
       );
+      this.releaseStuckBusyHosts().catch((err) =>
+        this.logger.warn(`release stuck busy hosts failed: ${(err as Error)?.message}`),
+      );
     }, 60_000);
   }
 
@@ -744,6 +747,19 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   private async cleanupStaleActiveCalls() {
     await this.presence.reconcileInCallState(this.db);
 
+    const stuckRinging = await this.db.query<any[]>(
+      `SELECT id, caller_id, host_id FROM calls
+       WHERE status = 'ringing' AND created_at < DATE_SUB(NOW(), INTERVAL 2 MINUTE)`,
+    );
+    for (const call of stuckRinging) {
+      await this.db.query(
+        `UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ? AND status = 'ringing'`,
+        [call.id],
+      );
+      this.presence.clearUsersInCall(Number(call.caller_id), Number(call.host_id));
+      this.logger.warn(`Closed stuck ringing call #${call.id}`);
+    }
+
     const rows = await this.db.query<any[]>(
       `SELECT id, caller_id, host_id, started_at FROM calls WHERE status = 'active'`,
     );
@@ -757,14 +773,13 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
       );
 
-      if (ageSeconds < 300) continue;
+      const callerOnline = this.socket.isUserOnline(callerId);
+      const hostOnline = this.socket.isUserOnline(hostId);
+      const shouldForceEnd =
+        ageSeconds >= 300 ||
+        (ageSeconds >= 45 && !callerOnline && !hostOnline);
 
-      if (this.presence.isUserInCall(callerId) || this.presence.isUserInCall(hostId)) {
-        continue;
-      }
-      if (this.socket.isUserOnline(callerId) || this.socket.isUserOnline(hostId)) {
-        continue;
-      }
+      if (!shouldForceEnd) continue;
 
       try {
         await this.end(call.id, callerId);
@@ -791,6 +806,8 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async releaseStuckBusyHosts() {
+    await this.presence.reconcileInCallState(this.db);
+
     const rows = await this.db.query<{ user_id: number }[]>(
       `SELECT fh.user_id
        FROM female_hosts fh
@@ -811,7 +828,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     );
 
     for (const row of rows) {
-      this.socket.notifyRole('male', 'host_available', { host_id: Number(row.user_id) });
+      const hostId = Number(row.user_id);
+      this.socket.notifyRole('male', 'host_available', { host_id: hostId });
+      this.logger.warn(`Released stuck busy host ${hostId}`);
     }
   }
 }
