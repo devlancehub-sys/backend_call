@@ -58,11 +58,12 @@ export class PushNotificationService implements OnModuleInit {
       call_id: String(payload.call_id ?? ''),
       caller_id: String(payload.caller_id ?? ''),
       host_id: String(payload.host_id ?? ''),
-      room_id: String(payload.room_id ?? payload.agora_channel ?? ''),
+      room_id: String(payload.room_id ?? ''),
       rate_per_minute: String(payload.rate_per_minute ?? ''),
       caller_name: callerName,
       caller_avatar_url: String(payload.caller_avatar_url ?? ''),
       initiated_by: String(payload.initiated_by ?? 'male'),
+      zego_app_id: String(payload.zego_app_id ?? ''),
     };
 
     return this.sendToUser(

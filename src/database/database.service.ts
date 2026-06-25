@@ -231,6 +231,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
     await this.ensureRecordStatusColumns();
     await this.ensureHostAvailabilityColumns();
+    await this.ensureCallsRoomIdColumn();
     await this.ensureHostDailyTaskColumns();
     await this.ensureHostOtpTable();
     await this.ensurePromoAndAccessKeyTables();
@@ -383,6 +384,17 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     if (!(await this.hasColumn('female_hosts', 'available_since'))) {
       await this.query(`ALTER TABLE female_hosts ADD COLUMN available_since DATETIME NULL`);
       this.logger.log('Added female_hosts.available_since column');
+    }
+  }
+
+  private async ensureCallsRoomIdColumn() {
+    if (!(await this.hasTable('calls'))) return;
+
+    if (!(await this.hasColumn('calls', 'room_id'))) {
+      await this.query(
+        `ALTER TABLE calls ADD COLUMN room_id VARCHAR(255) NOT NULL DEFAULT ''`,
+      );
+      this.logger.log('Added calls.room_id column');
     }
   }
 

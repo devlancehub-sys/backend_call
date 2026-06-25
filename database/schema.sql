@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS calls (
   caller_id           INT            NOT NULL,
   host_id             INT            NOT NULL,
   initiated_by        ENUM('male','female') NOT NULL DEFAULT 'male',
-  agora_channel       VARCHAR(255)   NOT NULL,
+  room_id             VARCHAR(255)   NOT NULL,
   rate_per_minute     DECIMAL(8,2)   NOT NULL DEFAULT 0.00,
   status              ENUM('ringing','active','ended','rejected','missed') NOT NULL DEFAULT 'ringing',
   started_at          DATETIME       NULL,

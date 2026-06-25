@@ -97,7 +97,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
     const roomId = this.createRoomId();
     const result = await this.db.query<any>(
-      `INSERT INTO calls (caller_id, host_id, initiated_by, agora_channel, rate_per_minute, status)
+      `INSERT INTO calls (caller_id, host_id, initiated_by, room_id, rate_per_minute, status)
        VALUES (?, ?, 'male', ?, ?, 'ringing')`,
       [callerId, hostId, roomId, ratePerMinute],
     );
@@ -171,7 +171,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
     const roomId = this.createRoomId();
     const result = await this.db.query<any>(
-      `INSERT INTO calls (caller_id, host_id, initiated_by, agora_channel, rate_per_minute, status)
+      `INSERT INTO calls (caller_id, host_id, initiated_by, room_id, rate_per_minute, status)
        VALUES (?, ?, 'female', ?, ?, 'ringing')`,
       [callerId, hostId, roomId, ratePerMinute],
     );
@@ -232,7 +232,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const roomId = call.agora_channel;
+    const roomId = call.room_id;
     const notifyId = initiatedBy === 'male' ? call.caller_id : call.host_id;
 
     const accepterToken = this.zegoToken.generateRoomToken(userId, roomId);
@@ -263,7 +263,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     this.socket.notifyUser(notifyId, 'call_accepted', {
       call_id: callId,
       room_id: roomId,
-      agora_channel: roomId,
       rate_per_minute: call.rate_per_minute,
       zego_token: peerToken,
       ...this.zegoToken.publicAppConfig(),
@@ -274,7 +273,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       data: {
         call_id: callId,
         room_id: roomId,
-        agora_channel: roomId,
         rate_per_minute: call.rate_per_minute,
         zego_token: accepterToken,
         ...this.zegoToken.publicAppConfig(),
@@ -285,30 +283,24 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   async reject(callId: number, userId: number, _role: string) {
     this.clearRingTimeout(callId);
 
-    const calls = await this.db.query<any[]>(
-      `SELECT * FROM calls WHERE id = ? AND status = 'ringing'`,
-      [callId],
-    );
-    if (!calls.length) throw new NotFoundException('Call not found');
+    const allCalls = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
+    if (!allCalls.length) throw new NotFoundException('Call not found');
 
-    const call = calls[0];
-    if (call.caller_id !== userId && call.host_id !== userId) {
+    const existing = allCalls[0];
+    if (existing.caller_id !== userId && existing.host_id !== userId) {
       throw new ForbiddenException('You are not a participant in this call');
+    }
+
+    if (existing.status !== 'ringing') {
+      return { success: true, message: 'Call already handled' };
     }
 
     await this.db.query(
       `UPDATE calls SET status = 'rejected', ended_at = NOW() WHERE id = ? AND status = 'ringing'`,
       [callId],
     );
-    const rejectedRows = await this.db.query<any[]>(
-      `SELECT id FROM calls WHERE id = ? AND status = 'rejected'`,
-      [callId],
-    );
-    if (!rejectedRows.length) {
-      throw new NotFoundException('Call not found or already handled');
-    }
 
-    const otherId = userId === call.caller_id ? call.host_id : call.caller_id;
+    const otherId = userId === existing.caller_id ? existing.host_id : existing.caller_id;
     this.socket.notifyUser(otherId, 'call_rejected', { call_id: callId });
 
     return { success: true, message: 'Call rejected' };
@@ -477,7 +469,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('You are not a participant in this call');
     }
 
-    const roomId = call.agora_channel;
+    const roomId = call.room_id;
     const token = this.safeGenerateToken(userId, roomId);
 
     return {
@@ -485,7 +477,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       data: {
         call_id: callId,
         room_id: roomId,
-        agora_channel: roomId,
         zego_token: token,
         ...this.zegoToken.publicAppConfig(),
       },
@@ -687,7 +678,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       caller_id: params.callerId,
       host_id: params.hostId,
       room_id: params.roomId,
-      agora_channel: params.roomId,
       rate_per_minute: params.ratePerMinute,
       host_level: params.hostLevel,
       initiated_by: params.initiatedBy,
