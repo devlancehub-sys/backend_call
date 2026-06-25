@@ -135,7 +135,17 @@ export class AuthService {
         [decoded.id, RECORD_STATUS.ACTIVE],
       );
       if (!users.length) throw new UnauthorizedException('Account is not active');
-      return { success: true, data: this.generateTokens(users[0]) };
+
+      const tokens = this.generateTokens(users[0]);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+      await this.db.query('UPDATE refresh_tokens SET token = ?, expires_at = ? WHERE id = ?', [
+        tokens.refreshToken,
+        expiresAt,
+        rows[0].id,
+      ]);
+
+      return { success: true, data: tokens };
     } catch (err) {
       if (err instanceof UnauthorizedException) throw err;
       throw new UnauthorizedException('Invalid refresh token');
