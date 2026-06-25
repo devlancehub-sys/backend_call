@@ -2,7 +2,7 @@ import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, HttpCode } f
 import { ApiOperation, ApiParam, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminService } from './admin.service';
 import { AdminApiKeyGuard } from '../common/guards/admin-api-key.guard';
-import { UpdateSettingsDto, UpdateUserStatusDto, PurgeUserDataDto } from './dto/admin.dto';
+import { UpdateSettingsDto, UpdateUserStatusDto } from './dto/admin.dto';
 
 @ApiTags('Admin')
 @ApiSecurity('admin-key')
@@ -73,7 +73,7 @@ export class AdminController {
   @ApiOperation({
     summary: 'Delete all user data — keeps admin accounts, languages, and platform settings',
   })
-  purgeUserData(@Body() body: PurgeUserDataDto) {
+  purgeUserData() {
     return this.adminService.purgeAllUserData();
   }
 }
