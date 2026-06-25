@@ -4,6 +4,8 @@ import {
   NotFoundException,
   ForbiddenException,
   Logger,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,9 +27,10 @@ import { RECORD_STATUS } from '../common/constants/record-status';
 const RING_TIMEOUT_MS = 45_000;
 
 @Injectable()
-export class CallsService {
+export class CallsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CallsService.name);
   private readonly ringTimeouts = new Map<number, NodeJS.Timeout>();
+  private staleCallJanitor: NodeJS.Timeout | null = null;
 
   constructor(
     private db: DatabaseService,
@@ -40,6 +43,22 @@ export class CallsService {
     private hostAvailability: HostAvailabilityService,
     private hostDailyTask: HostDailyTaskService,
   ) {}
+
+  onModuleInit() {
+    void this.releaseStuckBusyHosts();
+    this.staleCallJanitor = setInterval(() => {
+      this.cleanupStaleActiveCalls().catch((err) =>
+        this.logger.warn(`stale call janitor failed: ${(err as Error)?.message}`),
+      );
+    }, 60_000);
+  }
+
+  onModuleDestroy() {
+    if (this.staleCallJanitor) {
+      clearInterval(this.staleCallJanitor);
+      this.staleCallJanitor = null;
+    }
+  }
 
   /** Boy calls girl — money always deducted from boy (caller_id) */
   async initiate(callerId: number, hostId: number) {
@@ -610,6 +629,80 @@ export class CallsService {
     );
     if (parseFloat(wallets[0]?.balance || 0) < ratePerMinute) {
       throw new BadRequestException('Insufficient balance');
+    }
+  }
+
+  private async cleanupStaleActiveCalls() {
+    await this.presence.reconcileInCallState(this.db);
+
+    const rows = await this.db.query<any[]>(
+      `SELECT id, caller_id, host_id, started_at FROM calls WHERE status = 'active'`,
+    );
+
+    for (const call of rows) {
+      const callerId = Number(call.caller_id);
+      const hostId = Number(call.host_id);
+      const startedAtMs = call.started_at ? new Date(call.started_at).getTime() : Date.now();
+      const ageSeconds = Math.max(
+        0,
+        Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
+      );
+
+      if (ageSeconds < 300) continue;
+
+      if (this.presence.isUserInCall(callerId) || this.presence.isUserInCall(hostId)) {
+        continue;
+      }
+      if (this.socket.isUserOnline(callerId) || this.socket.isUserOnline(hostId)) {
+        continue;
+      }
+
+      try {
+        await this.end(call.id, callerId);
+        this.logger.warn(`Ended stale active call #${call.id} after ${ageSeconds}s`);
+      } catch (err) {
+        await this.forceEndOrphanCall(Number(call.id), callerId, hostId);
+        this.logger.warn(
+          `Force-ended orphan call #${call.id}: ${(err as Error)?.message || err}`,
+        );
+      }
+    }
+  }
+
+  private async forceEndOrphanCall(callId: number, callerId: number, hostId: number) {
+    await this.db.query(
+      `UPDATE calls SET status = 'ended', ended_at = NOW() WHERE id = ? AND status = 'active'`,
+      [callId],
+    );
+    this.presence.clearUsersInCall(callerId, hostId);
+    await this.hostAvailability.onCallEnded(hostId);
+    const payload = { call_id: callId, reason: 'stale_cleanup' };
+    this.socket.notifyUser(callerId, 'call_ended', payload);
+    this.socket.notifyUser(hostId, 'call_ended', payload);
+  }
+
+  private async releaseStuckBusyHosts() {
+    const rows = await this.db.query<{ user_id: number }[]>(
+      `SELECT fh.user_id
+       FROM female_hosts fh
+       WHERE fh.host_status = 'busy'
+         AND NOT EXISTS (
+           SELECT 1 FROM calls c WHERE c.status = 'active' AND c.host_id = fh.user_id
+         )`,
+    );
+    if (!rows.length) return;
+
+    await this.db.query(
+      `UPDATE female_hosts fh
+       SET host_status = 'available'
+       WHERE fh.host_status = 'busy'
+         AND NOT EXISTS (
+           SELECT 1 FROM calls c WHERE c.status = 'active' AND c.host_id = fh.user_id
+         )`,
+    );
+
+    for (const row of rows) {
+      this.socket.notifyRole('male', 'host_available', { host_id: Number(row.user_id) });
     }
   }
 }

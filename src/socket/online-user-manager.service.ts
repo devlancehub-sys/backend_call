@@ -170,6 +170,35 @@ export class OnlineUserManagerService implements OnModuleInit, OnModuleDestroy {
     this.emitBusyChange(callerId, hostId, false);
   }
 
+  /** Sync in-memory in-call flags with DB and broadcast availability fixes. */
+  async reconcileInCallState(db: DatabaseService) {
+    const activeCalls = await db.query<{ caller_id: number; host_id: number }[]>(
+      `SELECT caller_id, host_id FROM calls WHERE status = 'active'`,
+    );
+
+    const activeUserIds = new Set<number>();
+    for (const call of activeCalls) {
+      activeUserIds.add(Number(call.caller_id));
+      activeUserIds.add(Number(call.host_id));
+    }
+
+    for (const userId of [...this.inCallUsers]) {
+      if (activeUserIds.has(userId)) continue;
+      this.inCallUsers.delete(userId);
+      const session = this.sessions.get(userId);
+      if (!this.server || !session) continue;
+      if (session.role === 'female') {
+        this.server.to('role:male').emit('host_available', { host_id: userId });
+      } else if (session.role === 'male') {
+        this.server.to('role:female').emit('user_available', { user_id: userId });
+      }
+    }
+
+    for (const userId of activeUserIds) {
+      this.inCallUsers.add(userId);
+    }
+  }
+
   private emitBusyChange(callerId: number, hostId: number, busy: boolean) {
     if (!this.server) return;
 
