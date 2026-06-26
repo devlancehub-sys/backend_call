@@ -240,7 +240,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const roomId = call.room_id;
+    const roomId = this.resolveRoomId(call);
     const notifyId = initiatedBy === 'male' ? call.caller_id : call.host_id;
 
     const accepterToken = this.zegoToken.generateRoomToken(userId, roomId);
@@ -470,16 +470,16 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     return this.joinVoice(callId, userId);
   }
 
-  /** Issue fresh ZEGOCLOUD room credentials — apps must call this before SDK loginRoom. */
+  /** Issue fresh ZEGOCLOUD room credentials — apps call this before SDK loginRoom. */
   async joinVoice(callId: number, userId: number) {
     this.ensureZegoConfigured();
 
     const calls = await this.db.query<any[]>(
-      `SELECT * FROM calls WHERE id = ? AND status = 'active'`,
+      `SELECT * FROM calls WHERE id = ? AND status IN ('ringing', 'active')`,
       [callId],
     );
     if (!calls.length) {
-      throw new BadRequestException('Call is not active. Voice join is allowed after accept only.');
+      throw new BadRequestException('Call not found or already ended.');
     }
 
     const call = calls[0];
@@ -487,7 +487,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new ForbiddenException('You are not a participant in this call');
     }
 
-    const roomId = call.room_id;
+    const roomId = this.resolveRoomId(call);
     const token = this.zegoToken.generateRoomToken(userId, roomId);
     const ratePerMinute = parseFloat(call.rate_per_minute);
 
@@ -648,6 +648,17 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
   private createRoomId(): string {
     return `call_${uuidv4()}`;
+  }
+
+  /** Supports DBs migrated from legacy agora_channel → room_id. */
+  private resolveRoomId(call: Record<string, unknown>): string {
+    const candidates = [call.room_id, call.agora_channel, call.channel_name];
+    for (const raw of candidates) {
+      const id = raw == null ? '' : String(raw).trim();
+      if (id.length > 0) return id;
+    }
+    this.logger.error(`Call #${call.id} has no voice room id`);
+    throw new BadRequestException('Call room id is missing. Please start a new call.');
   }
 
   private buildEndPayload(
