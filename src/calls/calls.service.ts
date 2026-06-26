@@ -702,6 +702,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       host_id: params.hostId,
       room_id: params.roomId,
       rate_per_minute: params.ratePerMinute,
+      host_earning_per_minute: this.hostSharePerMinute(params.ratePerMinute),
       host_level: params.hostLevel,
       initiated_by: params.initiatedBy,
       host_name: params.hostName ?? null,

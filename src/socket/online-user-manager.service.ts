@@ -217,6 +217,15 @@ export class OnlineUserManagerService implements OnModuleInit, OnModuleDestroy {
     return this.sessions.get(userId)?.socketId;
   }
 
+  getOnlineUserIdsByRole(role: UserRole): number[] {
+    const ids: number[] = [];
+    for (const session of this.sessions.values()) {
+      if (session.role !== role || !this.isUserOnline(session.userId)) continue;
+      ids.push(session.userId);
+    }
+    return ids;
+  }
+
   getStats(): PresenceStats {
     let onlineMales = 0;
     let onlineFemales = 0;
