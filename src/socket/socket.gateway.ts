@@ -95,48 +95,6 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     return { ok: true, ts: Date.now() };
   }
 
-  @SubscribeMessage('incoming_call')
-  handleIncomingCall(@ConnectedSocket() client: Socket, data: { host_id: number }) {
-    this.emitToUserRoom(data.host_id, 'incoming_call', data);
-  }
-
-  @SubscribeMessage('call_accepted')
-  handleCallAccepted(
-    @ConnectedSocket() client: Socket,
-    data: { caller_id: number; host_id?: number },
-  ) {
-    this.emitToUserRoom(data.caller_id, 'call_accepted', data);
-    if (data.host_id) this.emitToUserRoom(data.host_id, 'call_accepted', data);
-  }
-
-  @SubscribeMessage('call_rejected')
-  handleCallRejected(
-    @ConnectedSocket() client: Socket,
-    data: { caller_id: number; host_id?: number },
-  ) {
-    this.emitToUserRoom(data.caller_id, 'call_rejected', data);
-    if (data.host_id) this.emitToUserRoom(data.host_id, 'call_rejected', data);
-  }
-
-  @SubscribeMessage('call_ended')
-  handleCallEnded(
-    @ConnectedSocket() client: Socket,
-    data: { caller_id?: number; host_id?: number; call_id?: number },
-  ) {
-    if (data.caller_id) this.emitToUserRoom(data.caller_id, 'call_ended', data);
-    if (data.host_id) this.emitToUserRoom(data.host_id, 'call_ended', data);
-  }
-
-  @SubscribeMessage('wallet_updated')
-  handleWalletUpdated(@ConnectedSocket() client: Socket, data: { user_id: number }) {
-    this.emitToUserRoom(data.user_id, 'wallet_updated', data);
-  }
-
-  @SubscribeMessage('earning_updated')
-  handleEarningUpdated(@ConnectedSocket() client: Socket, data: { host_id: number }) {
-    this.emitToUserRoom(data.host_id, 'earning_updated', data);
-  }
-
   notifyUser(userId: number, event: string, data: Record<string, unknown>): boolean {
     return this.presence.emitToUser(userId, event, data);
   }
