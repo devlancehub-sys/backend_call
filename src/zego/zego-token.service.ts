@@ -1,13 +1,24 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { generateToken04 } from './zegoServerAssistant';
 
 @Injectable()
-export class ZegoTokenService {
+export class ZegoTokenService implements OnModuleInit {
+  private readonly logger = new Logger(ZegoTokenService.name);
   private readonly tokenTtlSeconds: number;
 
   constructor(private readonly config: ConfigService) {
     this.tokenTtlSeconds = parseInt(this.config.get('ZEGOCLOUD_TOKEN_TTL_SECONDS', '3600'), 10);
+  }
+
+  onModuleInit() {
+    if (this.isConfigured()) {
+      this.logger.log(`ZEGOCLOUD ready — app_id=${this.appId}, token_ttl=${this.tokenTtlSeconds}s`);
+      return;
+    }
+    this.logger.warn(
+      'ZEGOCLOUD not configured — voice calls disabled. Set ZEGOCLOUD_APP_ID and 32-char ZEGOCLOUD_SERVER_SECRET in Railway/host env.',
+    );
   }
 
   get appId(): number {

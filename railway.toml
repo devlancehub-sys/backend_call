@@ -9,3 +9,4 @@ restartPolicyType = "ON_FAILURE"
 
 # Railway Free Tier: ~512MB RAM, ~0.2 vCPU shared
 # Set NODE_ENV=production and DB_POOL_SIZE=5 in Railway Variables
+# Voice calls: set ZEGOCLOUD_* — see railway.env.example

@@ -12,6 +12,8 @@ npm run db:setup       # applies database/schema.sql (also runs on start:prod)
 npm run start:dev      # http://localhost:3000/api
 ```
 
+See **[ENV.md](./ENV.md)** for every variable, where to get credentials, and production checklist.
+
 ## Health check
 
 `GET /api/health`
