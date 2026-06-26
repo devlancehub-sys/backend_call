@@ -144,9 +144,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   async initiateFromHost(hostId: number, callerId: number) {
     this.ensureZegoConfigured();
 
-    if (!this.socket.isUserOnline(callerId)) {
-      throw new BadRequestException('User is offline');
-    }
+    await this.assertHostReachable(callerId);
 
     if (this.presence.isUserInCall(callerId)) {
       throw new BadRequestException('User is busy on another call');
@@ -199,12 +197,14 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       callerAvatarUrl: callers[0].avatar_url,
     });
 
-    const delivered = this.socket.notifyUser(callerId, 'incoming_call', payload);
-    if (!delivered) {
+    const socketDelivered = this.socket.notifyUser(callerId, 'incoming_call', payload);
+    const pushSent = await this.push.sendIncomingCall(callerId, payload);
+
+    if (!socketDelivered && !pushSent) {
       await this.db.query(`UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`, [
         callId,
       ]);
-      throw new BadRequestException('User is offline');
+      throw new BadRequestException('User is not reachable');
     }
 
     this.scheduleMissedCallTimeout(callId, callerId, hostId, 'female');
@@ -282,6 +282,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         call_id: callId,
         room_id: roomId,
         rate_per_minute: call.rate_per_minute,
+        host_earning_per_minute: this.hostSharePerMinute(parseFloat(call.rate_per_minute)),
         zego_token: accepterToken,
         ...this.zegoToken.publicAppConfig(),
       },
@@ -466,11 +467,20 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async generateCallToken(callId: number, userId: number) {
+    return this.joinVoice(callId, userId);
+  }
+
+  /** Issue fresh ZEGOCLOUD room credentials — apps must call this before SDK loginRoom. */
+  async joinVoice(callId: number, userId: number) {
+    this.ensureZegoConfigured();
+
     const calls = await this.db.query<any[]>(
-      `SELECT * FROM calls WHERE id = ? AND status IN ('ringing', 'active')`,
+      `SELECT * FROM calls WHERE id = ? AND status = 'active'`,
       [callId],
     );
-    if (!calls.length) throw new NotFoundException('Call not found');
+    if (!calls.length) {
+      throw new BadRequestException('Call is not active. Voice join is allowed after accept only.');
+    }
 
     const call = calls[0];
     if (call.caller_id !== userId && call.host_id !== userId) {
@@ -478,13 +488,18 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     }
 
     const roomId = call.room_id;
-    const token = this.safeGenerateToken(userId, roomId);
+    const token = this.zegoToken.generateRoomToken(userId, roomId);
+    const ratePerMinute = parseFloat(call.rate_per_minute);
 
     return {
       success: true,
+      message: 'Voice join credentials issued by server',
       data: {
         call_id: callId,
         room_id: roomId,
+        user_id: userId,
+        rate_per_minute: ratePerMinute,
+        host_earning_per_minute: this.hostSharePerMinute(ratePerMinute),
         zego_token: token,
         ...this.zegoToken.publicAppConfig(),
       },
@@ -695,6 +710,12 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       caller_avatar_url: params.callerAvatarUrl ?? null,
       ...this.zegoToken.publicAppConfig(),
     };
+  }
+
+  private hostSharePerMinute(ratePerMinute: number): number {
+    const commissionPct = this.platformSettings.getCommissionPercentage();
+    const share = ratePerMinute * (1 - commissionPct / 100);
+    return parseFloat(share.toFixed(2));
   }
 
   private ensureZegoConfigured(): void {

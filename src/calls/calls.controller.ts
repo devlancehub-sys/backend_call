@@ -50,6 +50,13 @@ export class CallsController {
     return this.callsService.end(+id, req.user.id);
   }
 
+  @Post(':id/join-voice')
+  @ApiOperation({ summary: 'Get ZEGOCLOUD voice join credentials (token + room) from server' })
+  @ApiParam({ name: 'id', example: 42 })
+  joinVoice(@Req() req: any, @Param('id') id: string) {
+    return this.callsService.joinVoice(+id, req.user.id);
+  }
+
   @Get('history')
   @ApiOperation({ summary: 'Get call history' })
   @ApiQuery({ name: 'page', required: false, example: 1 })

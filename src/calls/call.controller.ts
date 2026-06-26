@@ -36,8 +36,8 @@ export class CallController {
   }
 
   @Post('token')
-  @ApiOperation({ summary: 'Generate Zego token for voice call room' })
+  @ApiOperation({ summary: 'Generate Zego token for voice call room (alias of join-voice)' })
   token(@Req() req: any, @Body() body: CallTokenDto) {
-    return this.callsService.generateCallToken(body.call_id, req.user.id);
+    return this.callsService.joinVoice(body.call_id, req.user.id);
   }
 }
