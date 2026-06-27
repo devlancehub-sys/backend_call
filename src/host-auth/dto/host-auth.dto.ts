@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, Length, Matches, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Length, Matches, Min, ValidateIf } from 'class-validator';
 
 export class HostLoginDto {
   @ApiProperty({ example: 'priya_host' })
@@ -92,4 +92,17 @@ export class SetHostAvailabilityDto {
   @IsString()
   @Matches(/^(available|busy|offline)$/)
   status: 'available' | 'busy' | 'offline';
+}
+
+export class SetHostRateDto {
+  @ApiProperty({ enum: [6, 12, 18, 24], description: 'Creator earning tier per minute' })
+  @IsInt()
+  @IsIn([6, 12, 18, 24])
+  earning_rate: 6 | 12 | 18 | 24;
+}
+
+export class SetHostFreeCallOfferDto {
+  @ApiProperty({ description: 'Offer 1 free minute to eligible new callers on this device' })
+  @IsBoolean()
+  offers_free_call: boolean;
 }

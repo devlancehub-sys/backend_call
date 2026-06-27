@@ -27,6 +27,12 @@ export class WalletController {
     return this.walletService.getTransactions(req.user.id, page, limit);
   }
 
+  @Get('recharge-packs')
+  @ApiOperation({ summary: 'List available recharge packs' })
+  getRechargePacks() {
+    return this.walletService.getRechargePacks();
+  }
+
   @Post('recharge')
   @ApiOperation({ summary: 'Initiate wallet recharge (boys only)' })
   @UseGuards(RolesGuard)

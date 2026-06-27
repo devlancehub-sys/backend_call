@@ -1,10 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { HostAccessKeyService } from '../common/services/host-access-key.service';
 import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import { CallsService } from '../calls/calls.service';
+import { HostLeaderboardService } from '../host-auth/host-leaderboard.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
+import { creatorEarningFromBoyRate, normalizeStoredBoyRate } from '../common/utils/creator-rate.util';
 
 @Injectable()
 export class AdminService {
@@ -16,6 +18,7 @@ export class AdminService {
     private hostAccessKey: HostAccessKeyService,
     private presence: OnlineUserManagerService,
     private callsService: CallsService,
+    private leaderboard: HostLeaderboardService,
   ) {}
 
   async getDashboard() {
@@ -69,7 +72,63 @@ export class AdminService {
               fh.total_calls, fh.rating, fh.is_featured
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id ORDER BY u.created_at DESC`,
     );
-    return { success: true, data: hosts };
+    return {
+      success: true,
+      data: hosts.map((host: any) => ({
+        ...host,
+        rate_per_minute: normalizeStoredBoyRate(host.rate_per_minute),
+        creator_earning_rate: creatorEarningFromBoyRate(normalizeStoredBoyRate(host.rate_per_minute)),
+      })),
+    };
+  }
+
+  async getWeeklyLeaderboard(limit = 50) {
+    return this.leaderboard.getCurrentWeekLeaderboard(limit);
+  }
+
+  async setHostPromoted(hostId: number, isFeatured: boolean) {
+    const rows = await this.db.query<any[]>(
+      `SELECT u.id FROM users u
+       JOIN female_hosts fh ON fh.user_id = u.id
+       WHERE u.id = ? AND u.role = 'female'`,
+      [hostId],
+    );
+    if (!rows.length) {
+      throw new NotFoundException('Host not found');
+    }
+
+    await this.db.query('UPDATE female_hosts SET is_featured = ? WHERE user_id = ?', [
+      isFeatured ? 1 : 0,
+      hostId,
+    ]);
+
+    return {
+      success: true,
+      message: isFeatured ? 'Creator promoted' : 'Creator promotion removed',
+      data: { host_id: hostId, is_featured: isFeatured ? 1 : 0 },
+    };
+  }
+
+  async promoteTopCreators(limit = 10) {
+    const leaderboard = await this.leaderboard.getCurrentWeekLeaderboard(limit);
+    const entries = leaderboard.data.entries.slice(0, limit);
+    const hostIds = entries.map((entry) => entry.host_id);
+
+    if (!hostIds.length) {
+      return { success: true, message: 'No creators to promote this week', data: { promoted: [] } };
+    }
+
+    await this.db.query('UPDATE female_hosts SET is_featured = 0');
+    await this.db.query(
+      `UPDATE female_hosts SET is_featured = 1 WHERE user_id IN (${hostIds.map(() => '?').join(',')})`,
+      hostIds,
+    );
+
+    return {
+      success: true,
+      message: `Promoted top ${hostIds.length} creators for this week`,
+      data: { promoted: entries },
+    };
   }
 
   async getCalls() {

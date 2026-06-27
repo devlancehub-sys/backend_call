@@ -1,17 +1,36 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
+import { getRechargePack, listRechargePacks } from '../common/utils/recharge-packs.util';
+import { FreeCallService } from './free-call.service';
+import { FREE_CALL_MAX_SECONDS } from '../common/utils/billing.util';
 
 @Injectable()
 export class WalletService {
-  constructor(private db: DatabaseService) {}
+  constructor(
+    private db: DatabaseService,
+    private freeCall: FreeCallService,
+  ) {}
 
   async getBalance(userId: number) {
     const wallets = await this.db.query<any[]>(
       'SELECT balance, currency FROM wallets WHERE user_id = ? AND status = ?',
       [userId, RECORD_STATUS.ACTIVE],
     );
-    return { success: true, data: wallets[0] || { balance: 0, currency: 'INR' } };
+    const freeCallAvailable = await this.freeCall.isAvailable(userId);
+
+    return {
+      success: true,
+      data: {
+        ...(wallets[0] || { balance: 0, currency: 'INR' }),
+        free_call_available: freeCallAvailable,
+        free_call_minutes: freeCallAvailable ? 1 : 0,
+      },
+    };
+  }
+
+  getRechargePacks() {
+    return { success: true, data: listRechargePacks() };
   }
 
   async getTransactions(userId: number, page = 1, limit = 20) {
@@ -25,22 +44,41 @@ export class WalletService {
   }
 
   async recharge(userId: number, amount: number, gateway = 'razorpay') {
-    const validAmounts = [100, 200, 500, 1000, 2000];
-    if (!validAmounts.includes(amount)) {
+    const pack = getRechargePack(amount);
+    if (!pack) {
       throw new BadRequestException('Invalid recharge amount');
     }
 
     const orderId = `order_${Date.now()}`;
+    const description =
+      pack.bonus_amount > 0
+        ? `Recharge ₹${pack.pay_amount} (+₹${pack.bonus_amount} bonus → ₹${pack.credit_amount})`
+        : `Recharge ₹${pack.pay_amount}`;
+
     await this.db.query(
       `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, payment_gateway, payment_id, status, description)
        SELECT ?, 'recharge', ?, balance, ?, ?, 'pending', ? FROM wallets WHERE user_id = ? AND status = ?`,
-      [userId, amount, gateway, orderId, `Recharge ₹${amount}`, userId, RECORD_STATUS.ACTIVE],
+      [userId, pack.pay_amount, gateway, orderId, description, userId, RECORD_STATUS.ACTIVE],
     );
 
-    return { success: true, data: { order_id: orderId, amount, gateway } };
+    return {
+      success: true,
+      data: {
+        order_id: orderId,
+        pay_amount: pack.pay_amount,
+        credit_amount: pack.credit_amount,
+        bonus_amount: pack.bonus_amount,
+        gateway,
+      },
+    };
   }
 
   async confirmRecharge(userId: number, paymentId: string, amount: number) {
+    const pack = getRechargePack(amount);
+    if (!pack) {
+      throw new BadRequestException('Invalid recharge amount');
+    }
+
     const pool = this.db.getPool();
     const conn = await pool.getConnection();
     try {
@@ -49,21 +87,37 @@ export class WalletService {
         'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
         [userId, RECORD_STATUS.ACTIVE],
       );
-      const newBalance = parseFloat(wallets[0].balance) + amount;
+      const newBalance = parseFloat(wallets[0].balance) + pack.credit_amount;
 
       await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [newBalance, userId]);
       await conn.query(
-        `UPDATE wallet_transactions SET status = 'completed', balance_after = ?
-         WHERE user_id = ? AND payment_id = ?`,
-        [newBalance, userId, paymentId],
+        `UPDATE wallet_transactions SET status = 'completed', balance_after = ?, amount = ?
+         WHERE user_id = ? AND payment_id = ? AND status = 'pending'`,
+        [newBalance, pack.credit_amount, userId, paymentId],
       );
       await conn.commit();
-      return { success: true, data: { balance: newBalance } };
+      return {
+        success: true,
+        data: {
+          balance: newBalance,
+          pay_amount: pack.pay_amount,
+          credit_amount: pack.credit_amount,
+          bonus_amount: pack.bonus_amount,
+        },
+      };
     } catch (err) {
       await conn.rollback();
       throw err;
     } finally {
       conn.release();
     }
+  }
+
+  hasFreeCallAvailable(userId: number): Promise<boolean> {
+    return this.freeCall.isAvailable(userId);
+  }
+
+  getFreeCallMaxSeconds() {
+    return FREE_CALL_MAX_SECONDS;
   }
 }

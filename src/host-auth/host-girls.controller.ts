@@ -1,11 +1,14 @@
-import { Controller, Get, Put, Post, Body, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Body, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { HostAvailabilityService } from './host-availability.service';
-import { HostDailyTaskService } from './host-daily-task.service';
-import { SetHostAvailabilityDto } from './dto/host-auth.dto';
+import { HostWeeklyStatsService } from './host-weekly-stats.service';
+import { HostRateService } from './host-rate.service';
+import { HostLeaderboardService } from './host-leaderboard.service';
+import { SetHostAvailabilityDto, SetHostFreeCallOfferDto, SetHostRateDto } from './dto/host-auth.dto';
+import { FreeCallService } from '../wallet/free-call.service';
 
 @ApiTags('Host')
 @ApiBearerAuth('JWT')
@@ -15,8 +18,23 @@ import { SetHostAvailabilityDto } from './dto/host-auth.dto';
 export class HostGirlsController {
   constructor(
     private availability: HostAvailabilityService,
-    private dailyTask: HostDailyTaskService,
+    private weeklyStats: HostWeeklyStatsService,
+    private rateService: HostRateService,
+    private leaderboard: HostLeaderboardService,
+    private freeCallService: FreeCallService,
   ) {}
+
+  @Get('rate')
+  @ApiOperation({ summary: 'Get creator rate tier and options (6/12/18/24)' })
+  getRate(@Req() req: any) {
+    return this.rateService.getRateProfile(req.user.id);
+  }
+
+  @Put('rate')
+  @ApiOperation({ summary: 'Select creator earning rate tier before going available' })
+  setRate(@Req() req: any, @Body() body: SetHostRateDto) {
+    return this.rateService.setRate(req.user.id, body.earning_rate);
+  }
 
   @Get('availability')
   @ApiOperation({ summary: 'Get host availability status (available / busy / offline)' })
@@ -30,21 +48,33 @@ export class HostGirlsController {
     return this.availability.setStatus(req.user.id, body.status);
   }
 
-  @Get('daily-task')
-  @ApiOperation({ summary: 'Daily task progress — 6 calls OR 60 minutes for streak & reward' })
-  getDailyTask(@Req() req: any) {
-    return this.dailyTask.getProgress(req.user.id);
+  @Get('free-call-offer')
+  @ApiOperation({ summary: 'Whether this creator offers 1 free minute to eligible new callers' })
+  getFreeCallOffer(@Req() req: any) {
+    return this.freeCallService.getHostFreeCallOffer(req.user.id);
   }
 
-  @Post('daily-task/claim-reward')
-  @ApiOperation({ summary: 'Claim daily task reward after completing target' })
-  claimDailyReward(@Req() req: any) {
-    return this.dailyTask.claimReward(req.user.id);
+  @Put('free-call-offer')
+  @ApiOperation({ summary: 'Enable or disable 1 free minute for eligible new callers' })
+  setFreeCallOffer(@Req() req: any, @Body() body: SetHostFreeCallOfferDto) {
+    return this.freeCallService.setHostFreeCallOffer(req.user.id, body.offers_free_call);
   }
 
-  @Post('daily-task/claim-weekly-bonus')
-  @ApiOperation({ summary: 'Claim weekly bonus after completing daily task all 7 days' })
-  claimWeeklyBonus(@Req() req: any) {
-    return this.dailyTask.claimWeeklyBonus(req.user.id);
+  @Get('weekly-talk-time')
+  @ApiOperation({ summary: 'Current week total talk time (Mon–Sun)' })
+  getWeeklyTalkTime(@Req() req: any) {
+    return this.weeklyStats.getCurrentWeekStats(req.user.id);
+  }
+
+  @Get('leaderboard')
+  @ApiOperation({ summary: 'Weekly creator leaderboard by talk time' })
+  getLeaderboard() {
+    return this.leaderboard.getCurrentWeekLeaderboard();
+  }
+
+  @Get('leaderboard/me')
+  @ApiOperation({ summary: 'Current host weekly leaderboard rank' })
+  getMyLeaderboardRank(@Req() req: any) {
+    return this.leaderboard.getHostRank(req.user.id);
   }
 }

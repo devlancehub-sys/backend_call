@@ -7,6 +7,7 @@ import {
 import { DatabaseService } from '../database/database.service';
 import { SocketGateway } from '../socket/socket.gateway';
 import { RECORD_STATUS } from '../common/constants/record-status';
+import { normalizeStoredBoyRate } from '../common/utils/creator-rate.util';
 
 export type HostStatus = 'offline' | 'available' | 'busy';
 
@@ -33,6 +34,10 @@ export class HostAvailabilityService {
     }
 
     const row = await this.getHostRow(userId);
+
+    if (status === 'available') {
+      normalizeStoredBoyRate(row.rate_per_minute);
+    }
 
     const availableSince =
       status === 'available' ? new Date() : status === 'offline' ? null : row.available_since;

@@ -30,6 +30,26 @@ export class AdminController {
     return this.adminService.getHosts();
   }
 
+  @Get('leaderboard')
+  @ApiOperation({ summary: 'Weekly creator leaderboard by talk time' })
+  getLeaderboard(@Query('limit') limit?: string) {
+    return this.adminService.getWeeklyLeaderboard(limit ? +limit : 50);
+  }
+
+  @Put('hosts/:id/promote')
+  @ApiOperation({ summary: 'Promote or demote a creator (60% earnings when promoted)' })
+  @ApiParam({ name: 'id', example: 12 })
+  promoteHost(@Param('id') id: string, @Body() body: { is_featured: boolean }) {
+    return this.adminService.setHostPromoted(+id, !!body.is_featured);
+  }
+
+  @Post('leaderboard/promote-top')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Promote top weekly creators from leaderboard' })
+  promoteTopCreators(@Body() body: { limit?: number }) {
+    return this.adminService.promoteTopCreators(body?.limit ?? 10);
+  }
+
   @Get('calls')
   @ApiOperation({ summary: 'List all calls' })
   getCalls() {

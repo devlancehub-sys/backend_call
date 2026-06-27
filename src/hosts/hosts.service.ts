@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { OnlineUserManagerService } from '../socket/online-user-manager.service';
-import { enrichHostRates } from '../common/utils/rate-tier.util';
+import {
+  creatorEarningFromBoyRate,
+  normalizeStoredBoyRate,
+} from '../common/utils/creator-rate.util';
 import {
   defaultGirlAvatarUrl,
   normalizeGirlAvatarUrl,
@@ -9,15 +12,17 @@ import {
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 function withHostAvatar(host: Record<string, unknown>, presence?: OnlineUserManagerService) {
-  const enriched = enrichHostRates(host);
-  const hostId = Number(enriched.id);
-  const hostStatus = String(enriched.host_status ?? 'offline');
+  const boyRate = normalizeStoredBoyRate(host.rate_per_minute);
+  const earningRate = creatorEarningFromBoyRate(boyRate);
+  const hostId = Number(host.id);
+  const hostStatus = String(host.host_status ?? 'offline');
   const inCall = presence?.isUserInCall(hostId) ?? false;
   return {
-    ...enriched,
+    ...host,
+    rate_per_minute: boyRate,
+    creator_earning_rate: earningRate,
     avatar_url:
-      normalizeGirlAvatarUrl(enriched.avatar_url as string) ?? defaultGirlAvatarUrl(),
-    // Busy while on an active 1-to-1 call (others should not call).
+      normalizeGirlAvatarUrl(host.avatar_url as string) ?? defaultGirlAvatarUrl(),
     is_busy: hostStatus === 'busy' || inCall,
   };
 }
@@ -31,19 +36,21 @@ export class HostsService {
 
   async browse(query: any) {
     const { language_id, search, page = 1, limit = 20 } = query;
+    const languageId = this.parseLanguageId(language_id);
 
     let sql = `
       SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
-             fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.host_status
+             fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.host_status,
+             fh.offers_free_call
       FROM users u
       JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
       WHERE u.role = 'female' AND u.status = ?
     `;
     const params: any[] = [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE];
 
-    if (language_id) {
-      sql += ` AND u.id IN (SELECT user_id FROM user_languages WHERE language_id = ? AND status = ?)`;
-      params.push(language_id, RECORD_STATUS.ACTIVE);
+    if (languageId) {
+      sql += this.languageFilterSql();
+      params.push(languageId, RECORD_STATUS.ACTIVE);
     }
     if (search) {
       sql += ` AND u.name LIKE ?`;
@@ -59,42 +66,55 @@ export class HostsService {
     return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
-  async getOnline() {
+  async getOnline(languageId?: number) {
     await this.presence.reconcileInCallState(this.db);
-    const hosts = await this.db.query(
-      `SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
-              fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.host_status
-       FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
-       WHERE u.role = 'female' AND u.status = ? AND u.is_online = 1
-       ORDER BY fh.rating DESC LIMIT 20`,
-      [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE],
-    );
+    let sql = `
+      SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
+             fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.host_status,
+             fh.offers_free_call
+      FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
+      WHERE u.role = 'female' AND u.status = ? AND u.is_online = 1`;
+    const params: any[] = [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE];
+    if (languageId) {
+      sql += this.languageFilterSql();
+      params.push(languageId, RECORD_STATUS.ACTIVE);
+    }
+    sql += ` ORDER BY fh.is_featured DESC, fh.rating DESC LIMIT 20`;
+    const hosts = await this.db.query(sql, params);
     return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
-  async getFeatured() {
-    const hosts = await this.db.query(
-      `SELECT u.id, u.name, u.age, u.avatar_url, fh.rate_per_minute, fh.rating,
-              fh.total_calls, u.is_online, fh.host_status
-       FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
-       WHERE u.role = 'female' AND u.status = ? AND fh.is_featured = 1
-       ORDER BY u.is_online DESC LIMIT 10`,
-      [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE],
-    );
+  async getFeatured(languageId?: number) {
+    let sql = `
+      SELECT u.id, u.name, u.age, u.avatar_url, fh.rate_per_minute, fh.rating,
+             fh.total_calls, u.is_online, fh.host_status, fh.is_featured, fh.offers_free_call
+      FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
+      WHERE u.role = 'female' AND u.status = ? AND fh.is_featured = 1`;
+    const params: any[] = [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE];
+    if (languageId) {
+      sql += this.languageFilterSql();
+      params.push(languageId, RECORD_STATUS.ACTIVE);
+    }
+    sql += ` ORDER BY u.is_online DESC LIMIT 10`;
+    const hosts = await this.db.query(sql, params);
     return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
-  async getFavorites(userId: number) {
-    const hosts = await this.db.query(
-      `SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
-              fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured
-       FROM favorites f
-       JOIN users u ON u.id = f.host_id AND u.status = ?
-       JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
-       WHERE f.user_id = ? AND f.status = ? AND u.role = 'female'
-       ORDER BY u.is_online DESC`,
-      [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE, userId, RECORD_STATUS.ACTIVE],
-    );
+  async getFavorites(userId: number, languageId?: number) {
+    let sql = `
+      SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
+             fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.offers_free_call
+      FROM favorites f
+      JOIN users u ON u.id = f.host_id AND u.status = ?
+      JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
+      WHERE f.user_id = ? AND f.status = ? AND u.role = 'female'`;
+    const params: any[] = [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE, userId, RECORD_STATUS.ACTIVE];
+    if (languageId) {
+      sql += this.languageFilterSql();
+      params.push(languageId, RECORD_STATUS.ACTIVE);
+    }
+    sql += ` ORDER BY u.is_online DESC`;
+    const hosts = await this.db.query(sql, params);
     return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
 
@@ -102,7 +122,7 @@ export class HostsService {
     const hosts = await this.db.query<any[]>(
       `SELECT u.id, u.name, u.age, u.avatar_url, u.about, u.is_online,
               fh.rate_per_minute, fh.rating, fh.total_calls, fh.total_duration_seconds,
-              fh.host_status
+              fh.host_status, fh.is_featured, fh.offers_free_call
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
        WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
       [RECORD_STATUS.ACTIVE, id, RECORD_STATUS.ACTIVE],
@@ -137,5 +157,17 @@ export class HostsService {
       [RECORD_STATUS.INACTIVE, userId, hostId],
     );
     return { success: true, message: 'Removed from favorites' };
+  }
+
+  private parseLanguageId(value: unknown): number | undefined {
+    const id = parseInt(String(value ?? ''), 10);
+    return Number.isFinite(id) && id > 0 ? id : undefined;
+  }
+
+  private languageFilterSql() {
+    return ` AND u.id IN (
+      SELECT user_id FROM user_languages
+      WHERE language_id = ? AND status = ?
+    )`;
   }
 }

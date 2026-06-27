@@ -231,8 +231,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
     await this.ensureRecordStatusColumns();
     await this.ensureHostAvailabilityColumns();
+    await this.ensureBoyFreeCallColumns();
     await this.ensureCallsRoomIdColumn();
-    await this.ensureHostDailyTaskColumns();
+    await this.ensureHostWeeklyStatsCleanup();
     await this.ensureHostOtpTable();
     await this.ensurePromoAndAccessKeyTables();
     void this.ensurePerformanceIndexes().catch((err) =>
@@ -415,6 +416,54 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     await this.dropLegacyCallsChannelColumns();
   }
 
+  private async ensureBoyFreeCallColumns() {
+    if (!(await this.hasTable('free_call_redemptions'))) {
+      await this.query(`
+        CREATE TABLE free_call_redemptions (
+          id INT NOT NULL AUTO_INCREMENT,
+          device_id VARCHAR(255) NOT NULL,
+          fcm_token VARCHAR(500) NOT NULL,
+          user_id INT NULL,
+          call_id INT NULL,
+          used_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (id),
+          UNIQUE KEY uq_free_call_device_token (device_id, fcm_token),
+          KEY idx_free_call_user (user_id),
+          CONSTRAINT fk_free_call_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+          CONSTRAINT fk_free_call_call FOREIGN KEY (call_id) REFERENCES calls (id) ON DELETE SET NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+      `);
+      this.logger.log('Created free_call_redemptions table');
+    }
+
+    if (await this.hasTable('calls') && !(await this.hasColumn('calls', 'is_free_call'))) {
+      await this.query(
+        'ALTER TABLE calls ADD COLUMN is_free_call TINYINT(1) NOT NULL DEFAULT 0',
+      );
+      this.logger.log('Added calls.is_free_call column');
+    }
+
+    if (await this.hasTable('calls') && !(await this.hasColumn('calls', 'free_call_device_id'))) {
+      await this.query('ALTER TABLE calls ADD COLUMN free_call_device_id VARCHAR(255) NULL');
+      this.logger.log('Added calls.free_call_device_id column');
+    }
+
+    if (await this.hasTable('calls') && !(await this.hasColumn('calls', 'free_call_fcm_token'))) {
+      await this.query('ALTER TABLE calls ADD COLUMN free_call_fcm_token VARCHAR(500) NULL');
+      this.logger.log('Added calls.free_call_fcm_token column');
+    }
+
+    if (
+      (await this.hasTable('female_hosts')) &&
+      !(await this.hasColumn('female_hosts', 'offers_free_call'))
+    ) {
+      await this.query(
+        'ALTER TABLE female_hosts ADD COLUMN offers_free_call TINYINT(1) NOT NULL DEFAULT 0',
+      );
+      this.logger.log('Added female_hosts.offers_free_call column');
+    }
+  }
+
   /** Production DBs may have both room_id and legacy agora_channel — drop the old column. */
   private async dropLegacyCallsChannelColumns() {
     if (!(await this.hasTable('calls'))) return;
@@ -437,94 +486,27 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async ensureHostDailyTaskColumns() {
+  private async ensureHostWeeklyStatsCleanup() {
     if (!(await this.hasTable('female_hosts'))) return;
 
-    if (!(await this.hasColumn('female_hosts', 'earning_status'))) {
-      await this.query(
-        `ALTER TABLE female_hosts ADD COLUMN earning_status ENUM('inactive','active') NOT NULL DEFAULT 'inactive'`,
-      );
-      this.logger.log('Added female_hosts.earning_status column');
-    }
+    await this.removeLegacyDailyTaskArtifacts();
 
-    if (!(await this.hasColumn('female_hosts', 'streak_count'))) {
-      await this.query(`ALTER TABLE female_hosts ADD COLUMN streak_count INT NOT NULL DEFAULT 0`);
-      this.logger.log('Added female_hosts.streak_count column');
-    }
-
-    if (!(await this.hasColumn('female_hosts', 'last_task_eval_date'))) {
-      await this.query(`ALTER TABLE female_hosts ADD COLUMN last_task_eval_date DATE NULL`);
-      this.logger.log('Added female_hosts.last_task_eval_date column');
-    }
-
-    const userIdType = await this.getUsersIdColumnType();
-
-    if (!(await this.hasTable('host_daily_tasks'))) {
-      await this.query(`
-        CREATE TABLE host_daily_tasks (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          host_id ${userIdType} NOT NULL,
-          task_date DATE NOT NULL,
-          completed_calls INT NOT NULL DEFAULT 0,
-          completed_minutes INT NOT NULL DEFAULT 0,
-          target_met TINYINT(1) NOT NULL DEFAULT 0,
-          reward_claimed TINYINT(1) NOT NULL DEFAULT 0,
-          reward_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          UNIQUE KEY uq_host_task_date (host_id, task_date),
-          CONSTRAINT fk_hdt_host FOREIGN KEY (host_id) REFERENCES users (id) ON DELETE CASCADE
-        )
-      `);
-      this.logger.log('Created host_daily_tasks table');
-    }
-
-    await this.ensureDailyTaskPlatformSettings();
-    await this.ensureHostWeeklyBonusTable();
-  }
-
-  private async ensureHostWeeklyBonusTable() {
-    const userIdType = await this.getUsersIdColumnType();
-
-    if (!(await this.hasTable('host_weekly_bonuses'))) {
-      await this.query(`
-        CREATE TABLE host_weekly_bonuses (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          host_id ${userIdType} NOT NULL,
-          week_start DATE NOT NULL,
-          days_completed INT NOT NULL DEFAULT 0,
-          bonus_granted TINYINT(1) NOT NULL DEFAULT 0,
-          bonus_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE KEY uq_host_week (host_id, week_start),
-          CONSTRAINT fk_hwb_host FOREIGN KEY (host_id) REFERENCES users (id) ON DELETE CASCADE
-        )
-      `);
-      this.logger.log('Created host_weekly_bonuses table');
+    if (await this.hasTable('host_weekly_bonuses')) {
+      await this.query('DROP TABLE host_weekly_bonuses');
+      this.logger.log('Dropped legacy host_weekly_bonuses table');
     }
   }
 
-  private async ensureDailyTaskPlatformSettings() {
-    if (!(await this.hasTable('platform_settings'))) return;
+  private async removeLegacyDailyTaskArtifacts() {
+    if (await this.hasTable('host_daily_tasks')) {
+      await this.query('DROP TABLE host_daily_tasks');
+      this.logger.log('Dropped legacy host_daily_tasks table');
+    }
 
-    const defaults: Array<[string, string]> = [
-      ['daily_min_calls', '6'],
-      ['daily_min_minutes', '60'],
-      ['daily_task_reward', '50'],
-      ['weekly_task_bonus', '200'],
-    ];
-
-    for (const [key, value] of defaults) {
-      const rows = await this.query<any[]>(
-        'SELECT setting_key FROM platform_settings WHERE setting_key = ?',
-        [key],
-      );
-      if (!rows.length) {
-        await this.query(
-          'INSERT INTO platform_settings (setting_key, setting_value) VALUES (?, ?)',
-          [key, value],
-        );
-        this.logger.log(`Seeded platform_settings.${key}`);
+    for (const column of ['earning_status', 'streak_count', 'last_task_eval_date']) {
+      if (await this.hasColumn('female_hosts', column)) {
+        await this.query(`ALTER TABLE female_hosts DROP COLUMN \`${column}\``);
+        this.logger.log(`Dropped legacy female_hosts.${column} column`);
       }
     }
   }

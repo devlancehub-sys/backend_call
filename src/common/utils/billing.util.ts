@@ -1,4 +1,5 @@
 export const DEFAULT_COMMISSION_PERCENTAGE = 40;
+export const FREE_CALL_MAX_SECONDS = 60;
 
 /**
  * Bill by full minutes (ceil). Any connected call bills at least 1 minute.
@@ -23,5 +24,61 @@ export const calculateBilling = (
     totalAmount: parseFloat(totalAmount.toFixed(2)),
     hostEarning: parseFloat(hostEarning.toFixed(2)),
     platformCommission: parseFloat(platformCommission.toFixed(2)),
+  };
+};
+
+export type BillingBreakdown = {
+  billableMinutes: number;
+  freeMinutes: number;
+  paidMinutes: number;
+  totalAmount: number;
+  paidAmount: number;
+  hostEarning: number;
+  platformCommission: number;
+};
+
+/**
+ * First minute is free for the boy; host still earns for the free minute (platform cost).
+ * Additional time is billed normally from the boy wallet.
+ */
+export const calculateFreeCallBilling = (
+  durationSeconds: number,
+  ratePerMinute: number,
+  commissionPct: number,
+): BillingBreakdown => {
+  const seconds = Math.max(0, Math.floor(Number.isFinite(durationSeconds) ? durationSeconds : 0));
+  const freeSeconds = Math.min(seconds, FREE_CALL_MAX_SECONDS);
+  const paidSeconds = Math.max(0, seconds - FREE_CALL_MAX_SECONDS);
+
+  const freePortion =
+    freeSeconds > 0
+      ? calculateBilling(Math.max(freeSeconds, 1), ratePerMinute, commissionPct)
+      : {
+          billableMinutes: 0,
+          totalAmount: 0,
+          hostEarning: 0,
+          platformCommission: 0,
+        };
+
+  const paidPortion =
+    paidSeconds > 0
+      ? calculateBilling(paidSeconds, ratePerMinute, commissionPct)
+      : {
+          billableMinutes: 0,
+          totalAmount: 0,
+          hostEarning: 0,
+          platformCommission: 0,
+        };
+
+  return {
+    billableMinutes: freePortion.billableMinutes + paidPortion.billableMinutes,
+    freeMinutes: freePortion.billableMinutes,
+    paidMinutes: paidPortion.billableMinutes,
+    totalAmount: paidPortion.totalAmount,
+    paidAmount: paidPortion.totalAmount,
+    hostEarning: parseFloat((freePortion.hostEarning + paidPortion.hostEarning).toFixed(2)),
+    platformCommission: parseFloat(
+      (freePortion.platformCommission + paidPortion.platformCommission).toFixed(2),
+    ),
   };
 };

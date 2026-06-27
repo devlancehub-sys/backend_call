@@ -163,6 +163,9 @@ CREATE TABLE IF NOT EXISTS calls (
   initiated_by        ENUM('male','female') NOT NULL DEFAULT 'male',
   room_id             VARCHAR(255)   NOT NULL,
   rate_per_minute     DECIMAL(8,2)   NOT NULL DEFAULT 0.00,
+  is_free_call        TINYINT(1)     NOT NULL DEFAULT 0,
+  free_call_device_id VARCHAR(255)   NULL,
+  free_call_fcm_token VARCHAR(500)   NULL,
   status              ENUM('ringing','active','ended','rejected','missed') NOT NULL DEFAULT 'ringing',
   started_at          DATETIME       NULL,
   ended_at            DATETIME       NULL,
@@ -176,6 +179,23 @@ CREATE TABLE IF NOT EXISTS calls (
   KEY idx_calls_host   (host_id),
   CONSTRAINT fk_calls_caller FOREIGN KEY (caller_id) REFERENCES users (id) ON DELETE CASCADE,
   CONSTRAINT fk_calls_host   FOREIGN KEY (host_id)   REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- One-time free minute per device_id + fcm_token pair
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS free_call_redemptions (
+  id         INT          NOT NULL AUTO_INCREMENT,
+  device_id  VARCHAR(255) NOT NULL,
+  fcm_token  VARCHAR(500) NOT NULL,
+  user_id    INT          NULL,
+  call_id    INT          NULL,
+  used_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_free_call_device_token (device_id, fcm_token),
+  KEY idx_free_call_user (user_id),
+  CONSTRAINT fk_free_call_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+  CONSTRAINT fk_free_call_call FOREIGN KEY (call_id) REFERENCES calls (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- -------------------------------------------------------------

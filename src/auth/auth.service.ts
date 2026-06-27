@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../database/database.service';
 import { QuickLoginDto } from './dto/auth.dto';
 import { RECORD_STATUS } from '../common/constants/record-status';
+import { FreeCallService } from '../wallet/free-call.service';
 
 @Injectable()
 export class AuthService {
@@ -13,6 +14,7 @@ export class AuthService {
     private db: DatabaseService,
     private jwt: JwtService,
     private config: ConfigService,
+    private freeCall: FreeCallService,
   ) {}
 
   /** Boys quick login — name + device_id only, no OTP */
@@ -91,10 +93,19 @@ export class AuthService {
         [user.id, tokens.refreshToken, deviceId, expiresAt, RECORD_STATUS.ACTIVE],
       );
 
+      const freeCallAvailable = await this.freeCall.isAvailable(user.id);
+
       return {
         success: true,
         data: {
-          user: { id: user.id, phone: user.phone, role: user.role, name: user.name },
+          user: {
+            id: user.id,
+            phone: user.phone,
+            role: user.role,
+            name: user.name,
+            free_call_available: freeCallAvailable,
+            free_call_minutes: freeCallAvailable ? 1 : 0,
+          },
           ...tokens,
         },
       };

@@ -38,9 +38,39 @@ If MySQL is down, returns `503` with `"status": "error"`.
 ## Billing rules
 
 - **Only the boy (caller) pays** — girl wallet is never debited
-- **Rate** — based on host level (₹10–₹18/min from total completed calls)
-- **Split** — host earns 60%, platform keeps 40% (`COMMISSION_PERCENTAGE=40`)
+- **New user offer** — **1 free minute** per unique `device_id` + `fcm_token` pair (one time only)
+- **After free minute** — extra talk time is charged from wallet; recharge required for future calls on same device/token
+- **Rate** — creator selects earning tier ₹6 / ₹12 / ₹18 / ₹24 per minute before going Available
+- **Promoted creators** — earn **60%** of the boy billing rate (`promoted_commission_percentage=40`)
+- **Standard creators** — earn **50%** by default (`standard_commission_percentage=50`)
 - **Minutes** — billed per full minute, rounded up (`Math.ceil`); minimum 1 minute per call
+
+## Recharge packs (boys)
+
+| User Pays | Wallet Credit |
+|----------:|--------------:|
+| ₹36 | ₹36 |
+| ₹60 | ₹60 |
+| ₹300 | ₹312 (+₹12 bonus) |
+| ₹600 | ₹636 (+₹36 bonus) |
+| ₹1200 | ₹1260 (+₹60 bonus) |
+| ₹1800 | ₹1896 (+₹96 bonus) |
+| ₹2400 | ₹2556 (+₹156 bonus) |
+
+## Creator flow
+
+```
+Select Rate (6/12/18/24)
+→ Available
+→ Receive Call
+→ Talk
+→ Call End
+→ Boy Wallet Deduct
+→ Creator Wallet Credit
+→ Weekly leaderboard update
+→ Admin promotes top creators
+→ Promoted creators earn 60%
+```
 
 ## Admin API
 

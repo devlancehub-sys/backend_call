@@ -28,26 +28,35 @@ export class HostsController {
 
   @Get('online')
   @ApiOperation({ summary: 'List online hosts (boys only)' })
+  @ApiQuery({ name: 'language_id', required: false, example: 1 })
   @UseGuards(RolesGuard)
   @Roles('male')
-  getOnline() {
-    return this.hostsService.getOnline();
+  getOnline(@Query('language_id') language_id?: string) {
+    const languageId = language_id ? parseInt(language_id, 10) : undefined;
+    return this.hostsService.getOnline(languageId && languageId > 0 ? languageId : undefined);
   }
 
   @Get('featured')
   @ApiOperation({ summary: 'List featured hosts (boys only)' })
+  @ApiQuery({ name: 'language_id', required: false, example: 1 })
   @UseGuards(RolesGuard)
   @Roles('male')
-  getFeatured() {
-    return this.hostsService.getFeatured();
+  getFeatured(@Query('language_id') language_id?: string) {
+    const languageId = language_id ? parseInt(language_id, 10) : undefined;
+    return this.hostsService.getFeatured(languageId && languageId > 0 ? languageId : undefined);
   }
 
   @Get('favorites')
   @ApiOperation({ summary: 'List favorite hosts (boys only)' })
+  @ApiQuery({ name: 'language_id', required: false, example: 1 })
   @UseGuards(RolesGuard)
   @Roles('male')
-  getFavorites(@Req() req: any) {
-    return this.hostsService.getFavorites(req.user.id);
+  getFavorites(@Req() req: any, @Query('language_id') language_id?: string) {
+    const languageId = language_id ? parseInt(language_id, 10) : undefined;
+    return this.hostsService.getFavorites(
+      req.user.id,
+      languageId && languageId > 0 ? languageId : undefined,
+    );
   }
 
   @Get(':id')

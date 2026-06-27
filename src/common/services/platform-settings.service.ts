@@ -39,26 +39,18 @@ export class PlatformSettingsService implements OnModuleInit {
   }
 
   getCommissionPercentage(): number {
-    return this.getNumber('commission_percentage', 'COMMISSION_PERCENTAGE', 40);
+    return this.getPromotedCommissionPercentage();
+  }
+
+  getPromotedCommissionPercentage(): number {
+    return this.getNumber('promoted_commission_percentage', 'COMMISSION_PERCENTAGE', 40);
+  }
+
+  getStandardCommissionPercentage(): number {
+    return this.getNumber('standard_commission_percentage', 'STANDARD_COMMISSION_PERCENTAGE', 50);
   }
 
   getDefaultHostRate(): number {
     return this.getNumber('default_host_rate', 'DEFAULT_HOST_RATE', 10);
-  }
-
-  getDailyMinCalls(): number {
-    return this.getNumber('daily_min_calls', 'DAILY_MIN_CALLS', 6);
-  }
-
-  getDailyMinMinutes(): number {
-    return this.getNumber('daily_min_minutes', 'DAILY_MIN_MINUTES', 60);
-  }
-
-  getDailyTaskReward(): number {
-    return this.getNumber('daily_task_reward', 'DAILY_TASK_REWARD', 50);
-  }
-
-  getWeeklyTaskBonus(): number {
-    return this.getNumber('weekly_task_bonus', 'WEEKLY_TASK_BONUS', 200);
   }
 }

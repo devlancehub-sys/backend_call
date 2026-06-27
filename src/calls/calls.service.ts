@@ -12,16 +12,14 @@ import { v4 as uuidv4 } from 'uuid';
 import { DatabaseService } from '../database/database.service';
 import { SocketGateway } from '../socket/socket.gateway';
 import { OnlineUserManagerService } from '../socket/online-user-manager.service';
-import { calculateBilling } from '../common/utils/billing.util';
-import {
-  getHostLevel,
-  resolveEffectiveRate,
-} from '../common/utils/rate-tier.util';
+import { calculateBilling, calculateFreeCallBilling, BillingBreakdown } from '../common/utils/billing.util';
+import { HostRateService } from '../host-auth/host-rate.service';
+import { FreeCallService } from '../wallet/free-call.service';
 import { ZegoTokenService } from '../zego/zego-token.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { PushNotificationService } from '../common/services/push-notification.service';
 import { HostAvailabilityService } from '../host-auth/host-availability.service';
-import { HostDailyTaskService } from '../host-auth/host-daily-task.service';
+import { WalletService } from '../wallet/wallet.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 const RING_TIMEOUT_MS = 45_000;
@@ -41,7 +39,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     private platformSettings: PlatformSettingsService,
     private push: PushNotificationService,
     private hostAvailability: HostAvailabilityService,
-    private hostDailyTask: HostDailyTaskService,
+    private hostRate: HostRateService,
+    private walletService: WalletService,
+    private freeCallService: FreeCallService,
   ) {}
 
   onModuleInit() {
@@ -80,7 +80,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     await this.assertHostReachable(hostId);
 
     const hosts = await this.db.query<any[]>(
-      `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls, fh.host_status
+      `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls, fh.host_status, fh.is_featured
        FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
        WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
@@ -94,17 +94,28 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       [callerId, RECORD_STATUS.ACTIVE],
     );
 
-    const totalCalls = parseInt(String(hosts[0].total_calls ?? 0), 10);
-    const hostLevel = getHostLevel(totalCalls);
-    const ratePerMinute = resolveEffectiveRate(totalCalls);
+    const billingRate = await this.hostRate.resolveBillingRate(hostId);
+    const ratePerMinute = billingRate.boyRatePerMinute;
+    const freeCallEligibility = await this.resolveFreeCallEligibility(callerId, hostId);
+    const isFreeCall = freeCallEligibility.isFreeCall;
 
-    await this.ensureCallerBalance(callerId, ratePerMinute);
+    await this.ensureCallerBalance(callerId, ratePerMinute, isFreeCall);
 
     const roomId = this.createRoomId();
     const result = await this.db.query<any>(
-      `INSERT INTO calls (caller_id, host_id, initiated_by, room_id, rate_per_minute, status)
-       VALUES (?, ?, 'male', ?, ?, 'ringing')`,
-      [callerId, hostId, roomId, ratePerMinute],
+      `INSERT INTO calls (
+         caller_id, host_id, initiated_by, room_id, rate_per_minute,
+         is_free_call, free_call_device_id, free_call_fcm_token, status
+       ) VALUES (?, ?, 'male', ?, ?, ?, ?, ?, 'ringing')`,
+      [
+        callerId,
+        hostId,
+        roomId,
+        ratePerMinute,
+        isFreeCall ? 1 : 0,
+        freeCallEligibility.identity?.device_id ?? null,
+        freeCallEligibility.identity?.fcm_token ?? null,
+      ],
     );
 
     const callId = result.insertId;
@@ -114,7 +125,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       hostId,
       roomId,
       ratePerMinute,
-      hostLevel,
+      isFreeCall,
+      isPromoted: billingRate.isPromoted,
+      hostSharePct: 100 - billingRate.commissionPct,
       initiatedBy: 'male',
       hostName: hosts[0].name,
       hostAvatarUrl: hosts[0].avatar_url,
@@ -155,7 +168,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     }
 
     const hosts = await this.db.query<any[]>(
-      `SELECT u.id, u.name, u.avatar_url, fh.total_calls FROM users u
+      `SELECT u.id, u.name, u.avatar_url, fh.total_calls, fh.is_featured FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
        WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
       [RECORD_STATUS.ACTIVE, hostId, RECORD_STATUS.ACTIVE],
@@ -169,17 +182,28 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     );
     if (!callers.length) throw new NotFoundException('User not found');
 
-    const totalCalls = parseInt(String(hosts[0].total_calls ?? 0), 10);
-    const hostLevel = getHostLevel(totalCalls);
-    const ratePerMinute = resolveEffectiveRate(totalCalls);
+    const billingRate = await this.hostRate.resolveBillingRate(hostId);
+    const ratePerMinute = billingRate.boyRatePerMinute;
+    const freeCallEligibility = await this.resolveFreeCallEligibility(callerId, hostId);
+    const isFreeCall = freeCallEligibility.isFreeCall;
 
-    await this.ensureCallerBalance(callerId, ratePerMinute);
+    await this.ensureCallerBalance(callerId, ratePerMinute, isFreeCall);
 
     const roomId = this.createRoomId();
     const result = await this.db.query<any>(
-      `INSERT INTO calls (caller_id, host_id, initiated_by, room_id, rate_per_minute, status)
-       VALUES (?, ?, 'female', ?, ?, 'ringing')`,
-      [callerId, hostId, roomId, ratePerMinute],
+      `INSERT INTO calls (
+         caller_id, host_id, initiated_by, room_id, rate_per_minute,
+         is_free_call, free_call_device_id, free_call_fcm_token, status
+       ) VALUES (?, ?, 'female', ?, ?, ?, ?, ?, 'ringing')`,
+      [
+        callerId,
+        hostId,
+        roomId,
+        ratePerMinute,
+        isFreeCall ? 1 : 0,
+        freeCallEligibility.identity?.device_id ?? null,
+        freeCallEligibility.identity?.fcm_token ?? null,
+      ],
     );
 
     const callId = result.insertId;
@@ -189,7 +213,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       hostId,
       roomId,
       ratePerMinute,
-      hostLevel,
+      isFreeCall,
+      isPromoted: billingRate.isPromoted,
+      hostSharePct: 100 - billingRate.commissionPct,
       initiatedBy: 'female',
       hostName: hosts[0].name,
       hostAvatarUrl: hosts[0].avatar_url,
@@ -268,6 +294,12 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       await this.hostAvailability.onCallAccepted(call.host_id);
     }
 
+    const billingRate = await this.hostRate.resolveBillingRate(call.host_id);
+    const hostEarningPerMinute = this.hostRate.earningPerMinute(
+      parseFloat(call.rate_per_minute),
+      billingRate.isPromoted,
+    );
+
     this.socket.notifyUser(notifyId, 'call_accepted', {
       call_id: callId,
       room_id: roomId,
@@ -282,7 +314,8 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         call_id: callId,
         room_id: roomId,
         rate_per_minute: call.rate_per_minute,
-        host_earning_per_minute: this.hostSharePerMinute(parseFloat(call.rate_per_minute)),
+        host_earning_per_minute: hostEarningPerMinute,
+        is_promoted: billingRate.isPromoted,
         zego_token: accepterToken,
         ...this.zegoToken.publicAppConfig(),
       },
@@ -352,12 +385,18 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         0,
         Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
       );
-      const commissionPct = this.platformSettings.getCommissionPercentage();
-      const billing = calculateBilling(
-        durationSeconds,
-        parseFloat(call.rate_per_minute),
-        commissionPct,
-      );
+      const billingRate = await this.hostRate.resolveBillingRate(call.host_id);
+      const ratePerMinute = parseFloat(call.rate_per_minute);
+      const isFreeCall = !!call.is_free_call;
+      const billing = isFreeCall
+        ? calculateFreeCallBilling(durationSeconds, ratePerMinute, billingRate.commissionPct)
+        : calculateBilling(durationSeconds, ratePerMinute, billingRate.commissionPct);
+
+      const amountDeducted = isFreeCall
+        ? (billing as BillingBreakdown).paidAmount
+        : billing.totalAmount;
+      const freeMinutes = isFreeCall ? (billing as BillingBreakdown).freeMinutes : 0;
+      const paidMinutes = isFreeCall ? (billing as BillingBreakdown).paidMinutes : billing.billableMinutes;
 
       const [wallets] = await conn.query<any[]>(
         'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
@@ -366,26 +405,44 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       if (!wallets.length) {
         throw new BadRequestException('Caller wallet not found');
       }
-      const newBalance = Math.max(0, parseFloat(wallets[0].balance) - billing.totalAmount);
-      await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [
-        newBalance,
-        call.caller_id,
-      ]);
 
-      await conn.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, status, description)
-         VALUES (?, 'call_deduction', ?, ?, 'completed', ?)`,
-        [call.caller_id, -billing.totalAmount, newBalance, `Call #${call.id}`],
-      );
+      const newBalance = Math.max(0, parseFloat(wallets[0].balance) - amountDeducted);
+
+      if (amountDeducted > 0) {
+        await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [
+          newBalance,
+          call.caller_id,
+        ]);
+
+        await conn.query(
+          `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, status, description)
+           VALUES (?, 'call_deduction', ?, ?, 'completed', ?)`,
+          [
+            call.caller_id,
+            -amountDeducted,
+            newBalance,
+            isFreeCall ? `Call #${call.id} (after free minute)` : `Call #${call.id}`,
+          ],
+        );
+      }
+
+      if (isFreeCall && call.free_call_device_id && call.free_call_fcm_token) {
+        await this.freeCallService.redeem({
+          deviceId: String(call.free_call_device_id),
+          fcmToken: String(call.free_call_fcm_token),
+          userId: call.caller_id,
+          callId: call.id,
+        });
+      }
 
       const [updateResult] = await conn.query<any>(
         `UPDATE calls SET status = 'ended', ended_at = NOW(), duration_seconds = ?,
          amount_deducted = ?, host_earning = ?, platform_commission = ? WHERE id = ? AND status = 'active'`,
         [
           durationSeconds,
-          billing.totalAmount,
+          amountDeducted,
           billing.hostEarning,
-          billing.platformCommission,
+          isFreeCall ? billing.platformCommission : billing.platformCommission,
           call.id,
         ],
       );
@@ -407,7 +464,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
           call.caller_id,
           call.host_id,
           durationSeconds,
-          billing.totalAmount,
+          amountDeducted,
           billing.hostEarning,
           RECORD_STATUS.ACTIVE,
         ],
@@ -415,7 +472,13 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
       await conn.query(
         `INSERT INTO earnings (host_id, call_id, amount, type, description, status) VALUES (?, ?, ?, 'call', ?, ?)`,
-        [call.host_id, call.id, billing.hostEarning, `Call #${call.id}`, RECORD_STATUS.ACTIVE],
+        [
+          call.host_id,
+          call.id,
+          billing.hostEarning,
+          isFreeCall ? `Free call #${call.id}` : `Call #${call.id}`,
+          RECORD_STATUS.ACTIVE,
+        ],
       );
 
       await conn.query(
@@ -429,23 +492,21 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       this.presence.clearUsersInCall(call.caller_id, call.host_id);
       await this.hostAvailability.onCallEnded(call.host_id);
 
-      try {
-        await this.hostDailyTask.evaluateAfterCall(call.host_id);
-      } catch (err) {
-        this.logger.warn(`daily task evaluate failed: ${(err as Error)?.message}`);
-      }
-
       const endPayload = this.buildEndPayload(call, {
         durationSeconds,
         billableMinutes: billing.billableMinutes,
-        totalAmount: billing.totalAmount,
+        totalAmount: amountDeducted,
         hostEarning: billing.hostEarning,
         platformCommission: billing.platformCommission,
+        isFreeCall,
+        freeMinutes,
+        paidMinutes,
       });
 
       this.socket.notifyUser(call.caller_id, 'wallet_updated', {
         user_id: call.caller_id,
         balance: newBalance,
+        free_call_available: false,
       });
       this.socket.notifyUser(call.host_id, 'earning_updated', {
         host_id: call.host_id,
@@ -490,6 +551,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     const roomId = this.resolveRoomId(call);
     const token = this.zegoToken.generateRoomToken(userId, roomId);
     const ratePerMinute = parseFloat(call.rate_per_minute);
+    const billingRate = await this.hostRate.resolveBillingRate(call.host_id);
 
     return {
       success: true,
@@ -499,7 +561,11 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         room_id: roomId,
         user_id: userId,
         rate_per_minute: ratePerMinute,
-        host_earning_per_minute: this.hostSharePerMinute(ratePerMinute),
+        host_earning_per_minute: this.hostRate.earningPerMinute(
+          ratePerMinute,
+          billingRate.isPromoted,
+        ),
+        is_promoted: billingRate.isPromoted,
         zego_token: token,
         ...this.zegoToken.publicAppConfig(),
       },
@@ -669,6 +735,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       totalAmount: number;
       hostEarning: number;
       platformCommission: number;
+      isFreeCall?: boolean;
+      freeMinutes?: number;
+      paidMinutes?: number;
     },
   ) {
     const durationSeconds =
@@ -690,8 +759,29 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       amount_deducted: amountDeducted,
       host_earning: hostEarning,
       platform_commission: platformCommission,
-      paid_by: 'caller' as const,
+      is_free_call: billing?.isFreeCall ?? !!call.is_free_call,
+      free_minutes: billing?.freeMinutes ?? (call.is_free_call ? 1 : 0),
+      paid_minutes: billing?.paidMinutes ?? 0,
+      paid_by: billing?.isFreeCall || call.is_free_call ? ('free_call' as const) : ('caller' as const),
     };
+  }
+
+  private async resolveFreeCallEligibility(callerId: number, hostId: number) {
+    const hostOffers = await this.freeCallService.hostOffersFreeCall(hostId);
+    if (!hostOffers) {
+      return { isFreeCall: false, identity: null as null };
+    }
+
+    const identity = await this.freeCallService.getCallerDeviceIdentity(callerId);
+    if (!identity) {
+      return { isFreeCall: false, identity: null as null };
+    }
+
+    const isFreeCall = await this.freeCallService.isAvailableForDevice(
+      identity.device_id,
+      identity.fcm_token,
+    );
+    return { isFreeCall, identity };
   }
 
   private buildCallPayload(params: {
@@ -700,7 +790,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     hostId: number;
     roomId: string;
     ratePerMinute: number;
-    hostLevel: number;
+    isFreeCall?: boolean;
+    isPromoted: boolean;
+    hostSharePct: number;
     initiatedBy: 'male' | 'female';
     hostName?: string;
     hostAvatarUrl?: string;
@@ -713,8 +805,14 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       host_id: params.hostId,
       room_id: params.roomId,
       rate_per_minute: params.ratePerMinute,
-      host_earning_per_minute: this.hostSharePerMinute(params.ratePerMinute),
-      host_level: params.hostLevel,
+      is_free_call: !!params.isFreeCall,
+      free_call_minutes: params.isFreeCall ? 1 : 0,
+      host_earning_per_minute: this.hostRate.earningPerMinute(
+        params.ratePerMinute,
+        params.isPromoted,
+      ),
+      host_share_percentage: params.hostSharePct,
+      is_promoted: params.isPromoted,
       initiated_by: params.initiatedBy,
       host_name: params.hostName ?? null,
       host_avatar_url: params.hostAvatarUrl ?? null,
@@ -722,12 +820,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       caller_avatar_url: params.callerAvatarUrl ?? null,
       ...this.zegoToken.publicAppConfig(),
     };
-  }
-
-  private hostSharePerMinute(ratePerMinute: number): number {
-    const commissionPct = this.platformSettings.getCommissionPercentage();
-    const share = ratePerMinute * (1 - commissionPct / 100);
-    return parseFloat(share.toFixed(2));
   }
 
   private ensureZegoConfigured(): void {
@@ -767,13 +859,21 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     return this.zegoToken.generateRoomToken(userId, roomId);
   }
 
-  private async ensureCallerBalance(callerId: number, ratePerMinute: number) {
+  private async ensureCallerBalance(
+    callerId: number,
+    ratePerMinute: number,
+    isFreeCall = false,
+  ) {
+    if (isFreeCall) return;
+
     const wallets = await this.db.query<any[]>(
       'SELECT balance FROM wallets WHERE user_id = ? AND status = ?',
       [callerId, RECORD_STATUS.ACTIVE],
     );
     if (parseFloat(wallets[0]?.balance || 0) < ratePerMinute) {
-      throw new BadRequestException('Insufficient balance');
+      throw new BadRequestException(
+        'Insufficient balance. Recharge your wallet — free minute only works with creators who offer it.',
+      );
     }
   }
 
