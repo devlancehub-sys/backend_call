@@ -95,8 +95,8 @@ export class SetHostAvailabilityDto {
 }
 
 export class SetHostRateDto {
-  @ApiProperty({ enum: [6, 12, 18, 24], description: 'Creator earning tier per minute' })
+  @ApiProperty({ enum: [6, 12, 18, 24, 40], description: 'Per-minute rate (₹/min)' })
   @IsInt()
-  @IsIn([6, 12, 18, 24])
-  earning_rate: 6 | 12 | 18 | 24;
+  @IsIn([6, 12, 18, 24, 40])
+  earning_rate: 6 | 12 | 18 | 24 | 40;
 }

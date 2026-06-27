@@ -232,6 +232,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     await this.ensureRecordStatusColumns();
     await this.ensureHostAvailabilityColumns();
     await this.ensureBoyFreeCallColumns();
+    await this.migratePricingV2();
     await this.ensureCallsRoomIdColumn();
     await this.ensureHostWeeklyStatsCleanup();
     await this.ensureHostOtpTable();
@@ -414,6 +415,38 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.dropLegacyCallsChannelColumns();
+  }
+
+  private async migratePricingV2() {
+    if (await this.hasTable('female_hosts')) {
+      const normalized = await this.query(
+        `UPDATE female_hosts SET rate_per_minute = 6
+         WHERE rate_per_minute NOT IN (6, 12, 18, 24, 40)`,
+      );
+      const normalizedCount = (normalized as { affectedRows?: number })?.affectedRows ?? 0;
+      if (normalizedCount > 0) {
+        this.logger.log(`Normalized ${normalizedCount} host rate(s) to allowed tiers (6/12/18/24/40)`);
+      }
+    }
+
+    if (!(await this.hasTable('platform_settings'))) return;
+
+    const rows = await this.query<{ setting_value: string }[]>(
+      'SELECT setting_value FROM platform_settings WHERE setting_key = ?',
+      ['pricing_v2_applied'],
+    );
+    if (rows.length && rows[0].setting_value === '1') return;
+
+    await this.query(
+      `INSERT INTO platform_settings (setting_key, setting_value) VALUES
+        ('commission_percentage', '50'),
+        ('promoted_commission_percentage', '50'),
+        ('standard_commission_percentage', '50'),
+        ('default_host_rate', '6'),
+        ('pricing_v2_applied', '1')
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+    );
+    this.logger.log('Pricing v2: 50% host / 50% platform commission applied');
   }
 
   private async ensureBoyFreeCallColumns() {

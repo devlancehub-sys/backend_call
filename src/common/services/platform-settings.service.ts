@@ -39,11 +39,11 @@ export class PlatformSettingsService implements OnModuleInit {
   }
 
   getCommissionPercentage(): number {
-    return this.getPromotedCommissionPercentage();
+    return this.getStandardCommissionPercentage();
   }
 
   getPromotedCommissionPercentage(): number {
-    return this.getNumber('promoted_commission_percentage', 'COMMISSION_PERCENTAGE', 40);
+    return this.getStandardCommissionPercentage();
   }
 
   getStandardCommissionPercentage(): number {
@@ -51,6 +51,6 @@ export class PlatformSettingsService implements OnModuleInit {
   }
 
   getDefaultHostRate(): number {
-    return this.getNumber('default_host_rate', 'DEFAULT_HOST_RATE', 10);
+    return this.getNumber('default_host_rate', 'DEFAULT_HOST_RATE', 6);
   }
 }

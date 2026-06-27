@@ -7,6 +7,14 @@ export const HOST_TIER_THRESHOLDS = {
   diamond: 280,
 } as const;
 
+/** Host share of per-minute call rate by creator level (remainder = platform). */
+export const HOST_SHARE_BY_TIER: Record<HostTier, number> = {
+  iron: 50,
+  silver: 55,
+  gold: 60,
+  diamond: 65,
+};
+
 export interface HostTierProfile {
   creator_tier: HostTier;
   creator_tier_label: string;
@@ -14,6 +22,8 @@ export interface HostTierProfile {
   next_tier: HostTier | null;
   next_tier_label: string | null;
   minutes_to_next_tier: number;
+  host_share_percentage: number;
+  platform_commission_percentage: number;
 }
 
 export function talkMinutesFromSeconds(totalDurationSeconds: number): number {
@@ -42,6 +52,14 @@ export function hostTierLabel(tier: HostTier): string {
     case 'diamond':
       return 'Diamond';
   }
+}
+
+export function hostSharePercentageForTier(tier: HostTier): number {
+  return HOST_SHARE_BY_TIER[tier];
+}
+
+export function platformCommissionForTier(tier: HostTier): number {
+  return 100 - hostSharePercentageForTier(tier);
 }
 
 export function buildHostTierProfile(totalDurationSeconds: number): HostTierProfile {
@@ -75,6 +93,8 @@ export function buildHostTierProfile(totalDurationSeconds: number): HostTierProf
     next_tier: nextTier,
     next_tier_label: nextTier ? hostTierLabel(nextTier) : null,
     minutes_to_next_tier: Math.max(0, minutesToNext),
+    host_share_percentage: hostSharePercentageForTier(creatorTier),
+    platform_commission_percentage: platformCommissionForTier(creatorTier),
   };
 }
 

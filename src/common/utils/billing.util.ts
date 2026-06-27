@@ -1,4 +1,4 @@
-export const DEFAULT_COMMISSION_PERCENTAGE = 40;
+export const DEFAULT_COMMISSION_PERCENTAGE = 50;
 export const FREE_CALL_MAX_SECONDS = 60;
 
 /**

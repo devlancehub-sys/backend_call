@@ -6,7 +6,11 @@ import { OnlineUserManagerService } from '../socket/online-user-manager.service'
 import { CallsService } from '../calls/calls.service';
 import { HostLeaderboardService } from '../host-auth/host-leaderboard.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
-import { creatorEarningFromBoyRate, normalizeStoredBoyRate } from '../common/utils/creator-rate.util';
+import { hostEarningPerMinute, normalizeStoredBoyRate } from '../common/utils/creator-rate.util';
+import {
+  hostSharePercentageForTier,
+  hostTierFromDurationSeconds,
+} from '../common/utils/host-tier.util';
 
 @Injectable()
 export class AdminService {
@@ -69,16 +73,21 @@ export class AdminService {
   async getHosts() {
     const hosts = await this.db.query(
       `SELECT u.id, u.name, u.phone, u.username, u.is_online, u.status, fh.rate_per_minute,
-              fh.total_calls, fh.rating, fh.is_featured
+              fh.total_calls, fh.rating, fh.is_featured, fh.total_duration_seconds
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id ORDER BY u.created_at DESC`,
     );
     return {
       success: true,
-      data: hosts.map((host: any) => ({
-        ...host,
-        rate_per_minute: normalizeStoredBoyRate(host.rate_per_minute),
-        creator_earning_rate: creatorEarningFromBoyRate(normalizeStoredBoyRate(host.rate_per_minute)),
-      })),
+      data: hosts.map((host: any) => {
+        const boyRate = normalizeStoredBoyRate(host.rate_per_minute);
+        const tier = hostTierFromDurationSeconds(Number(host.total_duration_seconds ?? 0));
+        const share = hostSharePercentageForTier(tier);
+        return {
+          ...host,
+          rate_per_minute: boyRate,
+          creator_earning_rate: hostEarningPerMinute(boyRate, share),
+        };
+      }),
     };
   }
 

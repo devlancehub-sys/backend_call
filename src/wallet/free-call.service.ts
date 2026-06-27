@@ -23,8 +23,8 @@ export class FreeCallService {
       [userId, RECORD_STATUS.ACTIVE],
     );
     const deviceId = rows[0]?.device_id?.toString()?.trim();
-    const fcmToken = rows[0]?.fcm_token?.toString()?.trim();
-    if (!deviceId || !fcmToken) return null;
+    if (!deviceId) return null;
+    const fcmToken = rows[0]?.fcm_token?.toString()?.trim() ?? '';
     return { device_id: deviceId, fcm_token: fcmToken };
   }
 
@@ -34,11 +34,11 @@ export class FreeCallService {
     return this.isAvailableForDevice(identity.device_id, identity.fcm_token);
   }
 
+  /** One free call per device — FCM token optional (still stored when present). */
   async isAvailableForDevice(deviceId: string, fcmToken: string): Promise<boolean> {
     const rows = await this.db.query<any[]>(
-      `SELECT id FROM free_call_redemptions
-       WHERE device_id = ? AND fcm_token = ? LIMIT 1`,
-      [deviceId, fcmToken],
+      `SELECT id FROM free_call_redemptions WHERE device_id = ? LIMIT 1`,
+      [deviceId],
     );
     return rows.length === 0;
   }
@@ -52,7 +52,7 @@ export class FreeCallService {
     await this.db.query(
       `INSERT INTO free_call_redemptions (device_id, fcm_token, user_id, call_id)
        VALUES (?, ?, ?, ?)`,
-      [params.deviceId, params.fcmToken, params.userId, params.callId],
+      [params.deviceId, params.fcmToken || '', params.userId, params.callId],
     );
   }
 }

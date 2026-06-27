@@ -37,7 +37,7 @@ export class AdminController {
   }
 
   @Put('hosts/:id/promote')
-  @ApiOperation({ summary: 'Promote or demote a creator (60% earnings when promoted)' })
+  @ApiOperation({ summary: 'Promote or demote a creator on leaderboard' })
   @ApiParam({ name: 'id', example: 12 })
   promoteHost(@Param('id') id: string, @Body() body: { is_featured: boolean }) {
     return this.adminService.setHostPromoted(+id, !!body.is_featured);

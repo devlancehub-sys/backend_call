@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
 import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import {
-  creatorEarningFromBoyRate,
+  hostEarningPerMinute,
   normalizeStoredBoyRate,
 } from '../common/utils/creator-rate.util';
-import { withCreatorTierFields } from '../common/utils/host-tier.util';
+import {
+  hostSharePercentageForTier,
+  hostTierFromDurationSeconds,
+  withCreatorTierFields,
+} from '../common/utils/host-tier.util';
 import {
   defaultGirlAvatarUrl,
   normalizeGirlAvatarUrl,
@@ -14,14 +18,16 @@ import { RECORD_STATUS } from '../common/constants/record-status';
 
 function withHostAvatar(host: Record<string, unknown>, presence?: OnlineUserManagerService) {
   const boyRate = normalizeStoredBoyRate(host.rate_per_minute);
-  const earningRate = creatorEarningFromBoyRate(boyRate);
+  const seconds = Number(host.total_duration_seconds ?? 0);
+  const tier = hostTierFromDurationSeconds(seconds);
+  const hostShare = hostSharePercentageForTier(tier);
   const hostId = Number(host.id);
   const hostStatus = String(host.host_status ?? 'offline');
   const inCall = presence?.isUserInCall(hostId) ?? false;
   return withCreatorTierFields({
     ...host,
     rate_per_minute: boyRate,
-    creator_earning_rate: earningRate,
+    creator_earning_rate: hostEarningPerMinute(boyRate, hostShare),
     avatar_url:
       normalizeGirlAvatarUrl(host.avatar_url as string) ?? defaultGirlAvatarUrl(),
     is_busy: hostStatus === 'busy' || inCall,
@@ -64,7 +70,9 @@ export class HostsService {
     params.push(limitNum, offsetNum);
 
     const hosts = await this.db.query(sql, params);
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
+    const withAvatars = hosts.map((h: any) => withHostAvatar(h, this.presence));
+    const withLanguages = await this.attachLanguages(withAvatars);
+    return { success: true, data: withLanguages };
   }
 
   async getOnline(languageId?: number) {
@@ -82,7 +90,9 @@ export class HostsService {
     }
     sql += ` ORDER BY fh.is_featured DESC, fh.total_calls DESC LIMIT 20`;
     const hosts = await this.db.query(sql, params);
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
+    const withAvatars = hosts.map((h: any) => withHostAvatar(h, this.presence));
+    const withLanguages = await this.attachLanguages(withAvatars);
+    return { success: true, data: withLanguages };
   }
 
   async getFeatured(languageId?: number) {
@@ -98,7 +108,9 @@ export class HostsService {
     }
     sql += ` ORDER BY u.is_online DESC LIMIT 10`;
     const hosts = await this.db.query(sql, params);
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
+    const withAvatars = hosts.map((h: any) => withHostAvatar(h, this.presence));
+    const withLanguages = await this.attachLanguages(withAvatars);
+    return { success: true, data: withLanguages };
   }
 
   async getFavorites(userId: number, languageId?: number) {
@@ -116,7 +128,9 @@ export class HostsService {
     }
     sql += ` ORDER BY u.is_online DESC`;
     const hosts = await this.db.query(sql, params);
-    return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
+    const withAvatars = hosts.map((h: any) => withHostAvatar(h, this.presence));
+    const withLanguages = await this.attachLanguages(withAvatars);
+    return { success: true, data: withLanguages };
   }
 
   async getById(id: number) {
@@ -170,5 +184,38 @@ export class HostsService {
       SELECT user_id FROM user_languages
       WHERE language_id = ? AND status = ?
     )`;
+  }
+
+  private async attachLanguages(hosts: Record<string, unknown>[]) {
+    if (!hosts.length) return hosts;
+
+    const ids = hosts.map((h) => Number(h.id)).filter((id) => id > 0);
+    if (!ids.length) return hosts;
+
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = await this.db.query<any[]>(
+      `SELECT ul.user_id, l.id, l.name, l.code
+       FROM user_languages ul
+       JOIN languages l ON l.id = ul.language_id AND l.status = ?
+       WHERE ul.user_id IN (${placeholders}) AND ul.status = ?
+       ORDER BY l.name`,
+      [RECORD_STATUS.ACTIVE, ...ids, RECORD_STATUS.ACTIVE],
+    );
+
+    const byUser = new Map<number, { id: number; name: string; code: string }[]>();
+    for (const row of rows) {
+      const userId = Number(row.user_id);
+      if (!byUser.has(userId)) byUser.set(userId, []);
+      byUser.get(userId)!.push({
+        id: Number(row.id),
+        name: String(row.name),
+        code: String(row.code),
+      });
+    }
+
+    return hosts.map((host) => ({
+      ...host,
+      languages: byUser.get(Number(host.id)) ?? [],
+    }));
   }
 }

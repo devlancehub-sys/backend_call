@@ -18,7 +18,9 @@ export class CallController {
   start(@Req() req: any, @Body() body: StartCallDto) {
     if (req.user.role === 'male') {
       if (!body.host_id) throw new BadRequestException('host_id is required');
-      return this.callsService.initiate(req.user.id, body.host_id);
+      return this.callsService.initiate(req.user.id, body.host_id, {
+        useFreeCall: body.use_free_call,
+      });
     }
 
     if (req.user.role === 'female') {

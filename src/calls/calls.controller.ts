@@ -18,7 +18,9 @@ export class CallsController {
   @UseGuards(RolesGuard)
   @Roles('male')
   initiate(@Req() req: any, @Body() body: InitiateCallDto) {
-    return this.callsService.initiate(req.user.id, body.host_id);
+    return this.callsService.initiate(req.user.id, body.host_id, {
+      useFreeCall: body.use_free_call,
+    });
   }
 
   @Post('initiate-caller')

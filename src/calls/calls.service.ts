@@ -14,7 +14,7 @@ import { SocketGateway } from '../socket/socket.gateway';
 import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import { calculateBilling, calculateFreeCallBilling, BillingBreakdown } from '../common/utils/billing.util';
 import { HostRateService } from '../host-auth/host-rate.service';
-import { FreeCallService } from '../wallet/free-call.service';
+import { FreeCallService, CallerDeviceIdentity } from '../wallet/free-call.service';
 import { ZegoTokenService } from '../zego/zego-token.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { PushNotificationService } from '../common/services/push-notification.service';
@@ -66,7 +66,11 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Boy calls girl — money always deducted from boy (caller_id) */
-  async initiate(callerId: number, hostId: number) {
+  async initiate(
+    callerId: number,
+    hostId: number,
+    opts?: { useFreeCall?: boolean },
+  ) {
     this.ensureZegoConfigured();
 
     await this.hostAvailability.assertCanReceiveCalls(hostId);
@@ -100,16 +104,12 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     const billingRate = await this.hostRate.resolveBillingRate(hostId);
     const ratePerMinute = billingRate.boyRatePerMinute;
     const freeCallEligibility = await this.resolveFreeCallEligibility(callerId);
-    const isFreeCall = freeCallEligibility.isFreeCall;
-
-    if (isFreeCall) {
-      const tier = await this.hostTier.getHostTier(hostId);
-      if (tier !== 'iron') {
-        throw new BadRequestException(
-          'Free minute is only for Iron creators (new hosts). Choose an Iron host or recharge for paid calls.',
-        );
-      }
-    }
+    const isFreeCall = await this.resolveIsFreeCall(
+      callerId,
+      hostId,
+      freeCallEligibility,
+      opts?.useFreeCall,
+    );
 
     await this.ensureCallerBalance(callerId, ratePerMinute, isFreeCall);
 
@@ -139,7 +139,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       ratePerMinute,
       isFreeCall,
       isPromoted: billingRate.isPromoted,
-      hostSharePct: 100 - billingRate.commissionPct,
+      hostSharePct: billingRate.hostSharePct,
       initiatedBy: 'male',
       hostName: hosts[0].name,
       hostAvatarUrl: hosts[0].avatar_url,
@@ -197,7 +197,12 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     const billingRate = await this.hostRate.resolveBillingRate(hostId);
     const ratePerMinute = billingRate.boyRatePerMinute;
     const freeCallEligibility = await this.resolveFreeCallEligibility(callerId);
-    const isFreeCall = freeCallEligibility.isFreeCall;
+    const isFreeCall = await this.resolveIsFreeCall(
+      callerId,
+      hostId,
+      freeCallEligibility,
+      undefined,
+    );
 
     await this.ensureCallerBalance(callerId, ratePerMinute, isFreeCall);
 
@@ -227,7 +232,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       ratePerMinute,
       isFreeCall,
       isPromoted: billingRate.isPromoted,
-      hostSharePct: 100 - billingRate.commissionPct,
+      hostSharePct: billingRate.hostSharePct,
       initiatedBy: 'female',
       hostName: hosts[0].name,
       hostAvatarUrl: hosts[0].avatar_url,
@@ -309,7 +314,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     const billingRate = await this.hostRate.resolveBillingRate(call.host_id);
     const hostEarningPerMinute = this.hostRate.earningPerMinute(
       parseFloat(call.rate_per_minute),
-      billingRate.isPromoted,
+      billingRate.hostSharePct,
     );
 
     this.socket.notifyUser(notifyId, 'call_accepted', {
@@ -439,10 +444,10 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         );
       }
 
-      if (isFreeCall && call.free_call_device_id && call.free_call_fcm_token) {
+      if (isFreeCall && call.free_call_device_id) {
         await this.freeCallService.redeem({
           deviceId: String(call.free_call_device_id),
-          fcmToken: String(call.free_call_fcm_token),
+          fcmToken: String(call.free_call_fcm_token ?? ''),
           userId: call.caller_id,
           callId: call.id,
         });
@@ -524,7 +529,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       this.socket.notifyUser(call.caller_id, 'wallet_updated', {
         user_id: call.caller_id,
         balance: newBalance,
-        free_call_available: false,
+        ...(isFreeCall ? { free_call_available: false } : {}),
       });
       this.socket.notifyUser(call.host_id, 'earning_updated', {
         host_id: call.host_id,
@@ -579,10 +584,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         room_id: roomId,
         user_id: userId,
         rate_per_minute: ratePerMinute,
-        host_earning_per_minute: this.hostRate.earningPerMinute(
-          ratePerMinute,
-          billingRate.isPromoted,
-        ),
+        host_earning_per_minute: this.hostRate.earningPerMinute(ratePerMinute, billingRate.hostSharePct),
         is_promoted: billingRate.isPromoted,
         zego_token: token,
         ...this.zegoToken.publicAppConfig(),
@@ -784,6 +786,28 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async resolveIsFreeCall(
+    callerId: number,
+    hostId: number,
+    freeCallEligibility: { isFreeCall: boolean; identity: CallerDeviceIdentity | null },
+    useFreeCall?: boolean,
+  ): Promise<boolean> {
+    if (!freeCallEligibility.isFreeCall) return false;
+
+    const tier = await this.hostTier.getHostTier(hostId);
+    if (tier !== 'iron') {
+      if (useFreeCall === true) {
+        throw new BadRequestException(
+          'Free minute is only for Iron creators. Pick an Iron host or recharge for paid calls.',
+        );
+      }
+      return false;
+    }
+
+    if (useFreeCall === false) return false;
+    return true;
+  }
+
   private async resolveFreeCallEligibility(callerId: number) {
     const identity = await this.freeCallService.getCallerDeviceIdentity(callerId);
     if (!identity) {
@@ -820,10 +844,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       rate_per_minute: params.ratePerMinute,
       is_free_call: !!params.isFreeCall,
       free_call_minutes: params.isFreeCall ? 1 : 0,
-      host_earning_per_minute: this.hostRate.earningPerMinute(
-        params.ratePerMinute,
-        params.isPromoted,
-      ),
+      host_earning_per_minute: this.hostRate.earningPerMinute(params.ratePerMinute, params.hostSharePct),
       host_share_percentage: params.hostSharePct,
       is_promoted: params.isPromoted,
       initiated_by: params.initiatedBy,

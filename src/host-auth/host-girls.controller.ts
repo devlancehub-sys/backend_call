@@ -25,13 +25,13 @@ export class HostGirlsController {
   ) {}
 
   @Get('rate')
-  @ApiOperation({ summary: 'Get creator rate tier and options (6/12/18/24)' })
+  @ApiOperation({ summary: 'Get creator rate options (₹6/12/18/24/40 per min)' })
   getRate(@Req() req: any) {
     return this.rateService.getRateProfile(req.user.id);
   }
 
   @Put('rate')
-  @ApiOperation({ summary: 'Select creator earning rate tier before going available' })
+  @ApiOperation({ summary: 'Select per-minute rate before going available' })
   setRate(@Req() req: any, @Body() body: SetHostRateDto) {
     return this.rateService.setRate(req.user.id, body.earning_rate);
   }

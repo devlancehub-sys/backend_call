@@ -283,8 +283,10 @@ CREATE TABLE IF NOT EXISTS platform_settings (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO platform_settings (setting_key, setting_value) VALUES
-  ('commission_percentage', '40'),
-  ('default_host_rate',     '10')
+  ('commission_percentage', '50'),
+  ('promoted_commission_percentage', '50'),
+  ('standard_commission_percentage', '50'),
+  ('default_host_rate', '6')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 
 -- -------------------------------------------------------------
