@@ -27,6 +27,7 @@ export class CallersService {
   }
 
   async getOnline(limit = 50) {
+    await this.presence.reconcileInCallState(this.db);
     const safeLimit = Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 100) : 50;
     const socketMaleIds = this.presence.getOnlineUserIdsByRole('male');
 

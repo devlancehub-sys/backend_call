@@ -28,34 +28,6 @@ export class FreeCallService {
     return { device_id: deviceId, fcm_token: fcmToken };
   }
 
-  async hostOffersFreeCall(hostId: number): Promise<boolean> {
-    const rows = await this.db.query<any[]>(
-      `SELECT offers_free_call FROM female_hosts
-       WHERE user_id = ? AND status = ?`,
-      [hostId, RECORD_STATUS.ACTIVE],
-    );
-    return !!rows[0]?.offers_free_call;
-  }
-
-  async getHostFreeCallOffer(hostId: number) {
-    const offers = await this.hostOffersFreeCall(hostId);
-    return {
-      success: true,
-      data: {
-        offers_free_call: offers,
-        free_call_minutes: offers ? 1 : 0,
-      },
-    };
-  }
-
-  async setHostFreeCallOffer(hostId: number, enabled: boolean) {
-    await this.db.query(
-      `UPDATE female_hosts SET offers_free_call = ? WHERE user_id = ? AND status = ?`,
-      [enabled ? 1 : 0, hostId, RECORD_STATUS.ACTIVE],
-    );
-    return this.getHostFreeCallOffer(hostId);
-  }
-
   async isAvailable(userId: number): Promise<boolean> {
     const identity = await this.getCallerDeviceIdentity(userId);
     if (!identity) return false;
@@ -69,11 +41,6 @@ export class FreeCallService {
       [deviceId, fcmToken],
     );
     return rows.length === 0;
-  }
-
-  async canUseFreeCallWithHost(userId: number, hostId: number): Promise<boolean> {
-    if (!(await this.hostOffersFreeCall(hostId))) return false;
-    return this.isAvailable(userId);
   }
 
   async redeem(params: {

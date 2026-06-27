@@ -19,6 +19,7 @@ import { ZegoTokenService } from '../zego/zego-token.service';
 import { PlatformSettingsService } from '../common/services/platform-settings.service';
 import { PushNotificationService } from '../common/services/push-notification.service';
 import { HostAvailabilityService } from '../host-auth/host-availability.service';
+import { HostTierService } from '../host-auth/host-tier.service';
 import { WalletService } from '../wallet/wallet.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
@@ -39,6 +40,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     private platformSettings: PlatformSettingsService,
     private push: PushNotificationService,
     private hostAvailability: HostAvailabilityService,
+    private hostTier: HostTierService,
     private hostRate: HostRateService,
     private walletService: WalletService,
     private freeCallService: FreeCallService,
@@ -80,7 +82,8 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     await this.assertHostReachable(hostId);
 
     const hosts = await this.db.query<any[]>(
-      `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls, fh.host_status, fh.is_featured
+      `SELECT u.id, u.name, u.avatar_url, u.is_online, fh.total_calls, fh.host_status, fh.is_featured,
+              fh.total_duration_seconds
        FROM users u
        JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
        WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
@@ -96,8 +99,17 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
     const billingRate = await this.hostRate.resolveBillingRate(hostId);
     const ratePerMinute = billingRate.boyRatePerMinute;
-    const freeCallEligibility = await this.resolveFreeCallEligibility(callerId, hostId);
+    const freeCallEligibility = await this.resolveFreeCallEligibility(callerId);
     const isFreeCall = freeCallEligibility.isFreeCall;
+
+    if (isFreeCall) {
+      const tier = await this.hostTier.getHostTier(hostId);
+      if (tier !== 'iron') {
+        throw new BadRequestException(
+          'Free minute is only for Iron creators (new hosts). Choose an Iron host or recharge for paid calls.',
+        );
+      }
+    }
 
     await this.ensureCallerBalance(callerId, ratePerMinute, isFreeCall);
 
@@ -184,7 +196,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
     const billingRate = await this.hostRate.resolveBillingRate(hostId);
     const ratePerMinute = billingRate.boyRatePerMinute;
-    const freeCallEligibility = await this.resolveFreeCallEligibility(callerId, hostId);
+    const freeCallEligibility = await this.resolveFreeCallEligibility(callerId);
     const isFreeCall = freeCallEligibility.isFreeCall;
 
     await this.ensureCallerBalance(callerId, ratePerMinute, isFreeCall);
@@ -289,9 +301,9 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
     this.presence.markUsersInCall(call.caller_id, call.host_id);
 
-    if (role === 'female') {
+    await this.hostAvailability.onCallAccepted(call.host_id);
+    if (initiatedBy === 'male' && role === 'female') {
       await this.hostAvailability.resetMissedOnAnswer(call.host_id);
-      await this.hostAvailability.onCallAccepted(call.host_id);
     }
 
     const billingRate = await this.hostRate.resolveBillingRate(call.host_id);
@@ -370,6 +382,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
       if (call.status === 'ended') {
         await conn.commit();
+        await this.finalizeCallPresence(Number(call.caller_id), Number(call.host_id));
         return {
           success: true,
           data: this.buildEndPayload(call),
@@ -451,6 +464,10 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         await conn.rollback();
         const endedRows = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
         if (endedRows[0]?.status === 'ended') {
+          await this.finalizeCallPresence(
+            Number(endedRows[0].caller_id),
+            Number(endedRows[0].host_id),
+          );
           return { success: true, data: this.buildEndPayload(endedRows[0]) };
         }
         throw new BadRequestException('Call is not active');
@@ -470,16 +487,18 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         ],
       );
 
-      await conn.query(
-        `INSERT INTO earnings (host_id, call_id, amount, type, description, status) VALUES (?, ?, ?, 'call', ?, ?)`,
-        [
-          call.host_id,
-          call.id,
-          billing.hostEarning,
-          isFreeCall ? `Free call #${call.id}` : `Call #${call.id}`,
-          RECORD_STATUS.ACTIVE,
-        ],
-      );
+      if (billing.hostEarning > 0) {
+        await conn.query(
+          `INSERT INTO earnings (host_id, call_id, amount, type, description, status) VALUES (?, ?, ?, 'call', ?, ?)`,
+          [
+            call.host_id,
+            call.id,
+            billing.hostEarning,
+            isFreeCall ? `Call #${call.id} (paid minutes)` : `Call #${call.id}`,
+            RECORD_STATUS.ACTIVE,
+          ],
+        );
+      }
 
       await conn.query(
         `UPDATE female_hosts SET total_calls = total_calls + 1,
@@ -489,8 +508,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
       await conn.commit();
 
-      this.presence.clearUsersInCall(call.caller_id, call.host_id);
-      await this.hostAvailability.onCallEnded(call.host_id);
+      await this.finalizeCallPresence(Number(call.caller_id), Number(call.host_id));
 
       const endPayload = this.buildEndPayload(call, {
         durationSeconds,
@@ -766,12 +784,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private async resolveFreeCallEligibility(callerId: number, hostId: number) {
-    const hostOffers = await this.freeCallService.hostOffersFreeCall(hostId);
-    if (!hostOffers) {
-      return { isFreeCall: false, identity: null as null };
-    }
-
+  private async resolveFreeCallEligibility(callerId: number) {
     const identity = await this.freeCallService.getCallerDeviceIdentity(callerId);
     if (!identity) {
       return { isFreeCall: false, identity: null as null };
@@ -872,7 +885,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     );
     if (parseFloat(wallets[0]?.balance || 0) < ratePerMinute) {
       throw new BadRequestException(
-        'Insufficient balance. Recharge your wallet — free minute only works with creators who offer it.',
+        'Insufficient balance. Recharge your wallet to continue calling.',
       );
     }
   }
@@ -926,13 +939,17 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async finalizeCallPresence(callerId: number, hostId: number) {
+    this.presence.clearUsersInCall(callerId, hostId);
+    await this.hostAvailability.onCallEnded(hostId);
+  }
+
   private async forceEndOrphanCall(callId: number, callerId: number, hostId: number) {
     await this.db.query(
       `UPDATE calls SET status = 'ended', ended_at = NOW() WHERE id = ? AND status = 'active'`,
       [callId],
     );
-    this.presence.clearUsersInCall(callerId, hostId);
-    await this.hostAvailability.onCallEnded(hostId);
+    await this.finalizeCallPresence(callerId, hostId);
     const payload = { call_id: callId, reason: 'stale_cleanup' };
     this.socket.notifyUser(callerId, 'call_ended', payload);
     this.socket.notifyUser(hostId, 'call_ended', payload);

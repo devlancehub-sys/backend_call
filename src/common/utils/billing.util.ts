@@ -38,7 +38,7 @@ export type BillingBreakdown = {
 };
 
 /**
- * First minute is free for the boy; host still earns for the free minute (platform cost).
+ * First minute is free for the boy — host earns ₹0 on the free minute.
  * Additional time is billed normally from the boy wallet.
  */
 export const calculateFreeCallBilling = (
@@ -50,15 +50,7 @@ export const calculateFreeCallBilling = (
   const freeSeconds = Math.min(seconds, FREE_CALL_MAX_SECONDS);
   const paidSeconds = Math.max(0, seconds - FREE_CALL_MAX_SECONDS);
 
-  const freePortion =
-    freeSeconds > 0
-      ? calculateBilling(Math.max(freeSeconds, 1), ratePerMinute, commissionPct)
-      : {
-          billableMinutes: 0,
-          totalAmount: 0,
-          hostEarning: 0,
-          platformCommission: 0,
-        };
+  const freeMinutes = freeSeconds > 0 ? 1 : 0;
 
   const paidPortion =
     paidSeconds > 0
@@ -71,14 +63,12 @@ export const calculateFreeCallBilling = (
         };
 
   return {
-    billableMinutes: freePortion.billableMinutes + paidPortion.billableMinutes,
-    freeMinutes: freePortion.billableMinutes,
+    billableMinutes: freeMinutes + paidPortion.billableMinutes,
+    freeMinutes,
     paidMinutes: paidPortion.billableMinutes,
     totalAmount: paidPortion.totalAmount,
     paidAmount: paidPortion.totalAmount,
-    hostEarning: parseFloat((freePortion.hostEarning + paidPortion.hostEarning).toFixed(2)),
-    platformCommission: parseFloat(
-      (freePortion.platformCommission + paidPortion.platformCommission).toFixed(2),
-    ),
+    hostEarning: paidPortion.hostEarning,
+    platformCommission: paidPortion.platformCommission,
   };
 };

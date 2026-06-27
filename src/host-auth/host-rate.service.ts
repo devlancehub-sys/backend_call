@@ -53,8 +53,8 @@ export class HostRateService {
     }
 
     const row = await this.getHostRow(hostId);
-    if (row.host_status === 'available' || row.host_status === 'busy') {
-      throw new BadRequestException('Go offline before changing your rate');
+    if (row.host_status === 'available') {
+      throw new BadRequestException('Go offline or turn Busy before changing your rate');
     }
 
     const boyRate = boyRateFromCreatorEarning(earningRate as CreatorEarningRate);

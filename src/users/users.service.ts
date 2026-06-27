@@ -4,6 +4,7 @@ import {
   defaultGirlAvatarUrl,
   normalizeGirlAvatarUrl,
 } from '../common/utils/avatar.util';
+import { buildHostTierProfile } from '../common/utils/host-tier.util';
 import { RECORD_STATUS } from '../common/constants/record-status';
 
 @Injectable()
@@ -13,7 +14,7 @@ export class UsersService {
   async getProfile(userId: number) {
     const users = await this.db.query<any[]>(
       `SELECT u.id, u.phone, u.username, u.role, u.name, u.email, u.avatar_url, u.age, u.about, u.is_online,
-              w.balance, fh.rate_per_minute, fh.kyc_status, fh.rating, fh.total_calls
+              w.balance, fh.rate_per_minute, fh.kyc_status, fh.rating, fh.total_calls, fh.total_duration_seconds
        FROM users u
        LEFT JOIN wallets w ON w.user_id = u.id AND w.status = ?
        LEFT JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
@@ -32,6 +33,8 @@ export class UsersService {
     if (profile.role === 'female') {
       profile.avatar_url =
         normalizeGirlAvatarUrl(profile.avatar_url) ?? defaultGirlAvatarUrl();
+      const tierProfile = buildHostTierProfile(Number(profile.total_duration_seconds ?? 0));
+      Object.assign(profile, tierProfile);
     }
 
     return { success: true, data: profile };

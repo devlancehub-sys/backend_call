@@ -7,8 +7,8 @@ import { HostAvailabilityService } from './host-availability.service';
 import { HostWeeklyStatsService } from './host-weekly-stats.service';
 import { HostRateService } from './host-rate.service';
 import { HostLeaderboardService } from './host-leaderboard.service';
-import { SetHostAvailabilityDto, SetHostFreeCallOfferDto, SetHostRateDto } from './dto/host-auth.dto';
-import { FreeCallService } from '../wallet/free-call.service';
+import { HostTierService } from './host-tier.service';
+import { SetHostAvailabilityDto, SetHostRateDto } from './dto/host-auth.dto';
 
 @ApiTags('Host')
 @ApiBearerAuth('JWT')
@@ -21,7 +21,7 @@ export class HostGirlsController {
     private weeklyStats: HostWeeklyStatsService,
     private rateService: HostRateService,
     private leaderboard: HostLeaderboardService,
-    private freeCallService: FreeCallService,
+    private tierService: HostTierService,
   ) {}
 
   @Get('rate')
@@ -48,16 +48,10 @@ export class HostGirlsController {
     return this.availability.setStatus(req.user.id, body.status);
   }
 
-  @Get('free-call-offer')
-  @ApiOperation({ summary: 'Whether this creator offers 1 free minute to eligible new callers' })
-  getFreeCallOffer(@Req() req: any) {
-    return this.freeCallService.getHostFreeCallOffer(req.user.id);
-  }
-
-  @Put('free-call-offer')
-  @ApiOperation({ summary: 'Enable or disable 1 free minute for eligible new callers' })
-  setFreeCallOffer(@Req() req: any, @Body() body: SetHostFreeCallOfferDto) {
-    return this.freeCallService.setHostFreeCallOffer(req.user.id, body.offers_free_call);
+  @Get('tier')
+  @ApiOperation({ summary: 'Creator level (Iron / Silver / Gold / Diamond) from talk minutes' })
+  getTier(@Req() req: any) {
+    return this.tierService.getTierProfile(req.user.id);
   }
 
   @Get('weekly-talk-time')

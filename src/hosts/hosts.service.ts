@@ -5,6 +5,7 @@ import {
   creatorEarningFromBoyRate,
   normalizeStoredBoyRate,
 } from '../common/utils/creator-rate.util';
+import { withCreatorTierFields } from '../common/utils/host-tier.util';
 import {
   defaultGirlAvatarUrl,
   normalizeGirlAvatarUrl,
@@ -17,14 +18,14 @@ function withHostAvatar(host: Record<string, unknown>, presence?: OnlineUserMana
   const hostId = Number(host.id);
   const hostStatus = String(host.host_status ?? 'offline');
   const inCall = presence?.isUserInCall(hostId) ?? false;
-  return {
+  return withCreatorTierFields({
     ...host,
     rate_per_minute: boyRate,
     creator_earning_rate: earningRate,
     avatar_url:
       normalizeGirlAvatarUrl(host.avatar_url as string) ?? defaultGirlAvatarUrl(),
     is_busy: hostStatus === 'busy' || inCall,
-  };
+  });
 }
 
 @Injectable()
@@ -41,7 +42,7 @@ export class HostsService {
     let sql = `
       SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
              fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.host_status,
-             fh.offers_free_call
+             fh.total_duration_seconds
       FROM users u
       JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
       WHERE u.role = 'female' AND u.status = ?
@@ -57,7 +58,7 @@ export class HostsService {
       params.push(`%${search}%`);
     }
 
-    sql += ` ORDER BY u.is_online DESC, fh.is_featured DESC, fh.rating DESC LIMIT ? OFFSET ?`;
+    sql += ` ORDER BY u.is_online DESC, fh.is_featured DESC, fh.total_calls DESC LIMIT ? OFFSET ?`;
     const limitNum = parseInt(String(limit), 10);
     const offsetNum = (parseInt(String(page), 10) - 1) * limitNum;
     params.push(limitNum, offsetNum);
@@ -71,7 +72,7 @@ export class HostsService {
     let sql = `
       SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
              fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.host_status,
-             fh.offers_free_call
+             fh.total_duration_seconds
       FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
       WHERE u.role = 'female' AND u.status = ? AND u.is_online = 1`;
     const params: any[] = [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE];
@@ -79,7 +80,7 @@ export class HostsService {
       sql += this.languageFilterSql();
       params.push(languageId, RECORD_STATUS.ACTIVE);
     }
-    sql += ` ORDER BY fh.is_featured DESC, fh.rating DESC LIMIT 20`;
+    sql += ` ORDER BY fh.is_featured DESC, fh.total_calls DESC LIMIT 20`;
     const hosts = await this.db.query(sql, params);
     return { success: true, data: hosts.map((h: any) => withHostAvatar(h, this.presence)) };
   }
@@ -87,7 +88,7 @@ export class HostsService {
   async getFeatured(languageId?: number) {
     let sql = `
       SELECT u.id, u.name, u.age, u.avatar_url, fh.rate_per_minute, fh.rating,
-             fh.total_calls, u.is_online, fh.host_status, fh.is_featured, fh.offers_free_call
+             fh.total_calls, u.is_online, fh.host_status, fh.is_featured, fh.total_duration_seconds
       FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
       WHERE u.role = 'female' AND u.status = ? AND fh.is_featured = 1`;
     const params: any[] = [RECORD_STATUS.ACTIVE, RECORD_STATUS.ACTIVE];
@@ -103,7 +104,7 @@ export class HostsService {
   async getFavorites(userId: number, languageId?: number) {
     let sql = `
       SELECT u.id, u.name, u.age, u.avatar_url, u.is_online, u.about,
-             fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.offers_free_call
+             fh.rate_per_minute, fh.rating, fh.total_calls, fh.is_featured, fh.total_duration_seconds
       FROM favorites f
       JOIN users u ON u.id = f.host_id AND u.status = ?
       JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
@@ -122,7 +123,7 @@ export class HostsService {
     const hosts = await this.db.query<any[]>(
       `SELECT u.id, u.name, u.age, u.avatar_url, u.about, u.is_online,
               fh.rate_per_minute, fh.rating, fh.total_calls, fh.total_duration_seconds,
-              fh.host_status, fh.is_featured, fh.offers_free_call
+              fh.host_status, fh.is_featured
        FROM users u JOIN female_hosts fh ON fh.user_id = u.id AND fh.status = ?
        WHERE u.id = ? AND u.role = 'female' AND u.status = ?`,
       [RECORD_STATUS.ACTIVE, id, RECORD_STATUS.ACTIVE],
