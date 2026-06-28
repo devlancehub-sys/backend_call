@@ -369,9 +369,45 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
   async end(callId: number, userId: number) {
     this.clearRingTimeout(callId);
 
+    const preRows = await this.db.query<any[]>(
+      `SELECT * FROM calls WHERE id = ?`,
+      [callId],
+    );
+    if (!preRows.length) throw new NotFoundException('Call not found');
+
+    const preCall = preRows[0];
+    if (preCall.caller_id !== userId && preCall.host_id !== userId) {
+      throw new ForbiddenException('You are not a participant in this call');
+    }
+
+    if (preCall.status === 'ended') {
+      await this.finalizeCallPresence(Number(preCall.caller_id), Number(preCall.host_id));
+      return {
+        success: true,
+        data: this.buildEndPayload(preCall),
+      };
+    }
+
+    if (preCall.status !== 'active') {
+      throw new BadRequestException('Call is not active');
+    }
+
+    const billingRate = await this.hostRate.resolveBillingRate(preCall.host_id);
+    const ratePerMinute = parseFloat(preCall.rate_per_minute);
+    const isFreeCall = !!preCall.is_free_call;
+    const freeCallRedeem = isFreeCall && preCall.free_call_device_id
+      ? {
+          deviceId: String(preCall.free_call_device_id),
+          fcmToken: String(preCall.free_call_fcm_token ?? ''),
+          userId: preCall.caller_id,
+          callId: preCall.id,
+        }
+      : null;
+
     const pool = this.db.getPool();
     const conn = await pool.getConnection();
     try {
+      await conn.query('SET innodb_lock_wait_timeout = 8');
       await conn.beginTransaction();
 
       const [calls] = await conn.query<any[]>(
@@ -403,9 +439,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         0,
         Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
       );
-      const billingRate = await this.hostRate.resolveBillingRate(call.host_id);
-      const ratePerMinute = parseFloat(call.rate_per_minute);
-      const isFreeCall = !!call.is_free_call;
       const billing = isFreeCall
         ? calculateFreeCallBilling(durationSeconds, ratePerMinute, billingRate.commissionPct)
         : calculateBilling(durationSeconds, ratePerMinute, billingRate.commissionPct);
@@ -442,15 +475,6 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
             isFreeCall ? `Call #${call.id} (after free minute)` : `Call #${call.id}`,
           ],
         );
-      }
-
-      if (isFreeCall && call.free_call_device_id) {
-        await this.freeCallService.redeem({
-          deviceId: String(call.free_call_device_id),
-          fcmToken: String(call.free_call_fcm_token ?? ''),
-          userId: call.caller_id,
-          callId: call.id,
-        });
       }
 
       const [updateResult] = await conn.query<any>(
@@ -513,6 +537,14 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
       await conn.commit();
 
+      if (freeCallRedeem) {
+        void this.freeCallService.redeem(freeCallRedeem).catch((err) =>
+          this.logger.warn(
+            `Free call redeem failed for call #${call.id}: ${(err as Error)?.message || err}`,
+          ),
+        );
+      }
+
       await this.finalizeCallPresence(Number(call.caller_id), Number(call.host_id));
 
       const endPayload = this.buildEndPayload(call, {
@@ -526,17 +558,24 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         paidMinutes,
       });
 
-      this.socket.notifyUser(call.caller_id, 'wallet_updated', {
-        user_id: call.caller_id,
-        balance: newBalance,
-        ...(isFreeCall ? { free_call_available: false } : {}),
+      setImmediate(() => {
+        this.socket.notifyUser(call.caller_id, 'wallet_updated', {
+          user_id: call.caller_id,
+          balance: newBalance,
+          ...(isFreeCall ? { free_call_available: false } : {}),
+        });
+        this.socket.notifyUser(call.host_id, 'earning_updated', {
+          host_id: call.host_id,
+          amount: billing.hostEarning,
+        });
+        const callerEnded = this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
+        const hostEnded = this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
+        if (!callerEnded || !hostEnded) {
+          this.logger.warn(
+            `call_ended socket missed call=${call.id} callerDelivered=${callerEnded} hostDelivered=${hostEnded}`,
+          );
+        }
       });
-      this.socket.notifyUser(call.host_id, 'earning_updated', {
-        host_id: call.host_id,
-        amount: billing.hostEarning,
-      });
-      this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
-      this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
 
       return {
         success: true,
@@ -544,6 +583,17 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       };
     } catch (err) {
       await conn.rollback();
+      const code = (err as { code?: string })?.code;
+      if (code === 'ER_LOCK_WAIT_TIMEOUT' || code === 'ER_LOCK_DEADLOCK') {
+        const endedRows = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
+        if (endedRows[0]?.status === 'ended') {
+          await this.finalizeCallPresence(
+            Number(endedRows[0].caller_id),
+            Number(endedRows[0].host_id),
+          );
+          return { success: true, data: this.buildEndPayload(endedRows[0]) };
+        }
+      }
       throw err;
     } finally {
       conn.release();
@@ -942,9 +992,13 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
 
       const callerOnline = this.socket.isUserOnline(callerId);
       const hostOnline = this.socket.isUserOnline(hostId);
+      const trackedInCall =
+        this.presence.isUserInCall(callerId) || this.presence.isUserInCall(hostId);
+      // Socket can drop during an active Zego voice call — do not force-end at 45s
+      // while the server still tracks participants as in-call (avoids billing races).
       const shouldForceEnd =
         ageSeconds >= 300 ||
-        (ageSeconds >= 45 && !callerOnline && !hostOnline);
+        (ageSeconds >= 45 && !callerOnline && !hostOnline && !trackedInCall);
 
       if (!shouldForceEnd) continue;
 

@@ -6,10 +6,15 @@ import {
 } from '../common/utils/avatar.util';
 import { buildHostTierProfile } from '../common/utils/host-tier.util';
 import { RECORD_STATUS } from '../common/constants/record-status';
+import { SocketGateway } from '../socket/socket.gateway';
+import { UpdateProfileDto } from './dto/users.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(private db: DatabaseService) {}
+  constructor(
+    private db: DatabaseService,
+    private socket: SocketGateway,
+  ) {}
 
   async getProfile(userId: number) {
     const users = await this.db.query<any[]>(
@@ -40,27 +45,63 @@ export class UsersService {
     return { success: true, data: profile };
   }
 
-  async updateProfile(userId: number, body: any) {
-    const { name, email, age, about, avatar_url } = body;
-
+  async updateProfile(userId: number, body: UpdateProfileDto) {
     const users = await this.db.query<any[]>('SELECT role FROM users WHERE id = ?', [
       userId,
     ]);
     const role = users[0]?.role as string | undefined;
 
-    let storedAvatar = avatar_url;
-    if (role === 'female') {
-      storedAvatar =
-        avatar_url != null && avatar_url !== ''
-          ? normalizeGirlAvatarUrl(avatar_url) ?? defaultGirlAvatarUrl()
-          : avatar_url;
+    const fields: string[] = [];
+    const values: unknown[] = [];
+
+    if (body.name !== undefined) {
+      fields.push('name = ?');
+      values.push(body.name);
+    }
+    if (body.email !== undefined) {
+      fields.push('email = ?');
+      values.push(body.email);
+    }
+    if (body.age !== undefined) {
+      fields.push('age = ?');
+      values.push(body.age);
+    }
+    if (body.about !== undefined) {
+      fields.push('about = ?');
+      values.push(body.about);
+    }
+    if (body.avatar_url !== undefined) {
+      let storedAvatar = body.avatar_url;
+      if (role === 'female') {
+        storedAvatar =
+          body.avatar_url != null && body.avatar_url !== ''
+            ? normalizeGirlAvatarUrl(body.avatar_url) ?? defaultGirlAvatarUrl()
+            : body.avatar_url;
+      }
+      fields.push('avatar_url = ?');
+      values.push(storedAvatar);
     }
 
-    await this.db.query(
-      'UPDATE users SET name = ?, email = ?, age = ?, about = ?, avatar_url = ? WHERE id = ?',
-      [name, email, age, about, storedAvatar, userId],
-    );
-    return { success: true, message: 'Profile updated' };
+    if (fields.length) {
+      values.push(userId);
+      await this.db.query(
+        `UPDATE users SET ${fields.join(', ')} WHERE id = ?`,
+        values,
+      );
+    }
+
+    const profile = await this.getProfile(userId);
+
+    if (role === 'female') {
+      const data = profile.data as Record<string, unknown>;
+      this.socket.notifyRole('male', 'host_profile_updated', {
+        host_id: userId,
+        avatar_url: data.avatar_url ?? defaultGirlAvatarUrl(),
+        name: data.name ?? null,
+      });
+    }
+
+    return profile;
   }
 
   async updateLanguages(userId: number, languageIds: number[]) {

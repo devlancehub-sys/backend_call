@@ -246,9 +246,9 @@ export class OnlineUserManagerService implements OnModuleInit, OnModuleDestroy {
   }
 
   emitToUser(userId: number, event: string, data: Record<string, unknown>): boolean {
-    if (!this.server || !this.isUserOnline(userId)) return false;
+    if (!this.server || !this.sessions.has(userId)) return false;
     this.server.to(`user:${userId}`).emit(event, data);
-    return true;
+    return this.isUserOnline(userId);
   }
 
   emitPresenceOnline(userId: number, role: UserRole, isReconnect: boolean) {
