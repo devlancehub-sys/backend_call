@@ -29,6 +29,7 @@ const RING_TIMEOUT_MS = 45_000;
 export class CallsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(CallsService.name);
   private readonly ringTimeouts = new Map<number, NodeJS.Timeout>();
+  private readonly endingCalls = new Map<number, Promise<any>>();
   private staleCallJanitor: NodeJS.Timeout | null = null;
 
   constructor(
@@ -392,211 +393,227 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Call is not active');
     }
 
-    const billingRate = await this.hostRate.resolveBillingRate(preCall.host_id);
-    const ratePerMinute = parseFloat(preCall.rate_per_minute);
-    const isFreeCall = !!preCall.is_free_call;
-    const freeCallRedeem = isFreeCall && preCall.free_call_device_id
-      ? {
-          deviceId: String(preCall.free_call_device_id),
-          fcmToken: String(preCall.free_call_fcm_token ?? ''),
-          userId: preCall.caller_id,
-          callId: preCall.id,
+    const inFlightEnd = this.endingCalls.get(callId);
+    if (inFlightEnd) {
+      return inFlightEnd;
+    }
+
+    const endOperation = (async () => {
+      const billingRate = await this.hostRate.resolveBillingRate(preCall.host_id);
+      const ratePerMinute = parseFloat(preCall.rate_per_minute);
+      const isFreeCall = !!preCall.is_free_call;
+      const freeCallRedeem = isFreeCall && preCall.free_call_device_id
+        ? {
+            deviceId: String(preCall.free_call_device_id),
+            fcmToken: String(preCall.free_call_fcm_token ?? ''),
+            userId: preCall.caller_id,
+            callId: preCall.id,
+          }
+        : null;
+
+      const pool = this.db.getPool();
+      const conn = await pool.getConnection();
+      try {
+        await conn.query('SET innodb_lock_wait_timeout = 8');
+        await conn.beginTransaction();
+
+        const [calls] = await conn.query<any[]>(
+          `SELECT * FROM calls WHERE id = ? FOR UPDATE`,
+          [callId],
+        );
+        if (!calls.length) throw new NotFoundException('Call not found');
+
+        const call = calls[0];
+        if (call.caller_id !== userId && call.host_id !== userId) {
+          throw new ForbiddenException('You are not a participant in this call');
         }
-      : null;
 
-    const pool = this.db.getPool();
-    const conn = await pool.getConnection();
-    try {
-      await conn.query('SET innodb_lock_wait_timeout = 8');
-      await conn.beginTransaction();
+        if (call.status === 'ended') {
+          await conn.commit();
+          await this.finalizeCallPresence(Number(call.caller_id), Number(call.host_id));
+          return {
+            success: true,
+            data: this.buildEndPayload(call),
+          };
+        }
 
-      const [calls] = await conn.query<any[]>(
-        `SELECT * FROM calls WHERE id = ? FOR UPDATE`,
-        [callId],
-      );
-      if (!calls.length) throw new NotFoundException('Call not found');
+        if (call.status !== 'active') {
+          throw new BadRequestException('Call is not active');
+        }
 
-      const call = calls[0];
-      if (call.caller_id !== userId && call.host_id !== userId) {
-        throw new ForbiddenException('You are not a participant in this call');
-      }
+        const startedAtMs = call.started_at ? new Date(call.started_at).getTime() : Date.now();
+        const durationSeconds = Math.max(
+          0,
+          Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
+        );
+        const billing = isFreeCall
+          ? calculateFreeCallBilling(durationSeconds, ratePerMinute, billingRate.commissionPct)
+          : calculateBilling(durationSeconds, ratePerMinute, billingRate.commissionPct);
 
-      if (call.status === 'ended') {
-        await conn.commit();
-        await this.finalizeCallPresence(Number(call.caller_id), Number(call.host_id));
-        return {
-          success: true,
-          data: this.buildEndPayload(call),
-        };
-      }
+        const amountDeducted = isFreeCall
+          ? (billing as BillingBreakdown).paidAmount
+          : billing.totalAmount;
+        const freeMinutes = isFreeCall ? (billing as BillingBreakdown).freeMinutes : 0;
+        const paidMinutes = isFreeCall
+          ? (billing as BillingBreakdown).paidMinutes
+          : billing.billableMinutes;
 
-      if (call.status !== 'active') {
-        throw new BadRequestException('Call is not active');
-      }
+        const [wallets] = await conn.query<any[]>(
+          'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
+          [call.caller_id, RECORD_STATUS.ACTIVE],
+        );
+        if (!wallets.length) {
+          throw new BadRequestException('Caller wallet not found');
+        }
 
-      const startedAtMs = call.started_at ? new Date(call.started_at).getTime() : Date.now();
-      const durationSeconds = Math.max(
-        0,
-        Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
-      );
-      const billing = isFreeCall
-        ? calculateFreeCallBilling(durationSeconds, ratePerMinute, billingRate.commissionPct)
-        : calculateBilling(durationSeconds, ratePerMinute, billingRate.commissionPct);
+        const newBalance = Math.max(0, parseFloat(wallets[0].balance) - amountDeducted);
 
-      const amountDeducted = isFreeCall
-        ? (billing as BillingBreakdown).paidAmount
-        : billing.totalAmount;
-      const freeMinutes = isFreeCall ? (billing as BillingBreakdown).freeMinutes : 0;
-      const paidMinutes = isFreeCall ? (billing as BillingBreakdown).paidMinutes : billing.billableMinutes;
-
-      const [wallets] = await conn.query<any[]>(
-        'SELECT balance FROM wallets WHERE user_id = ? AND status = ? FOR UPDATE',
-        [call.caller_id, RECORD_STATUS.ACTIVE],
-      );
-      if (!wallets.length) {
-        throw new BadRequestException('Caller wallet not found');
-      }
-
-      const newBalance = Math.max(0, parseFloat(wallets[0].balance) - amountDeducted);
-
-      if (amountDeducted > 0) {
-        await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [
-          newBalance,
-          call.caller_id,
-        ]);
-
-        await conn.query(
-          `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, status, description)
-           VALUES (?, 'call_deduction', ?, ?, 'completed', ?)`,
-          [
-            call.caller_id,
-            -amountDeducted,
+        if (amountDeducted > 0) {
+          await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [
             newBalance,
-            isFreeCall ? `Call #${call.id} (after free minute)` : `Call #${call.id}`,
+            call.caller_id,
+          ]);
+
+          await conn.query(
+            `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, status, description)
+             VALUES (?, 'call_deduction', ?, ?, 'completed', ?)`,
+            [
+              call.caller_id,
+              -amountDeducted,
+              newBalance,
+              isFreeCall ? `Call #${call.id} (after free minute)` : `Call #${call.id}`,
+            ],
+          );
+        }
+
+        const [updateResult] = await conn.query<any>(
+          `UPDATE calls SET status = 'ended', ended_at = NOW(), duration_seconds = ?,
+           amount_deducted = ?, host_earning = ?, platform_commission = ? WHERE id = ? AND status = 'active'`,
+          [
+            durationSeconds,
+            amountDeducted,
+            billing.hostEarning,
+            isFreeCall ? billing.platformCommission : billing.platformCommission,
+            call.id,
           ],
         );
-      }
 
-      const [updateResult] = await conn.query<any>(
-        `UPDATE calls SET status = 'ended', ended_at = NOW(), duration_seconds = ?,
-         amount_deducted = ?, host_earning = ?, platform_commission = ? WHERE id = ? AND status = 'active'`,
-        [
-          durationSeconds,
-          amountDeducted,
-          billing.hostEarning,
-          isFreeCall ? billing.platformCommission : billing.platformCommission,
-          call.id,
-        ],
-      );
-
-      if (!(updateResult as { affectedRows?: number })?.affectedRows) {
-        await conn.rollback();
-        const endedRows = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
-        if (endedRows[0]?.status === 'ended') {
-          await this.finalizeCallPresence(
-            Number(endedRows[0].caller_id),
-            Number(endedRows[0].host_id),
-          );
-          return { success: true, data: this.buildEndPayload(endedRows[0]) };
+        if (!(updateResult as { affectedRows?: number })?.affectedRows) {
+          await conn.rollback();
+          const endedRows = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
+          if (endedRows[0]?.status === 'ended') {
+            await this.finalizeCallPresence(
+              Number(endedRows[0].caller_id),
+              Number(endedRows[0].host_id),
+            );
+            return { success: true, data: this.buildEndPayload(endedRows[0]) };
+          }
+          throw new BadRequestException('Call is not active');
         }
-        throw new BadRequestException('Call is not active');
-      }
 
-      await conn.query(
-        `INSERT INTO call_logs (call_id, caller_id, host_id, duration_seconds, amount_deducted, host_earning, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          call.id,
-          call.caller_id,
-          call.host_id,
-          durationSeconds,
-          amountDeducted,
-          billing.hostEarning,
-          RECORD_STATUS.ACTIVE,
-        ],
-      );
-
-      if (billing.hostEarning > 0) {
         await conn.query(
-          `INSERT INTO earnings (host_id, call_id, amount, type, description, status) VALUES (?, ?, ?, 'call', ?, ?)`,
+          `INSERT INTO call_logs (call_id, caller_id, host_id, duration_seconds, amount_deducted, host_earning, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
-            call.host_id,
             call.id,
+            call.caller_id,
+            call.host_id,
+            durationSeconds,
+            amountDeducted,
             billing.hostEarning,
-            isFreeCall ? `Call #${call.id} (paid minutes)` : `Call #${call.id}`,
             RECORD_STATUS.ACTIVE,
           ],
         );
-      }
 
-      await conn.query(
-        `UPDATE female_hosts SET total_calls = total_calls + 1,
-         total_duration_seconds = total_duration_seconds + ? WHERE user_id = ?`,
-        [durationSeconds, call.host_id],
-      );
-
-      await conn.commit();
-
-      if (freeCallRedeem) {
-        void this.freeCallService.redeem(freeCallRedeem).catch((err) =>
-          this.logger.warn(
-            `Free call redeem failed for call #${call.id}: ${(err as Error)?.message || err}`,
-          ),
+        await conn.query(
+          `UPDATE female_hosts SET total_calls = total_calls + 1,
+           total_duration_seconds = total_duration_seconds + ? WHERE user_id = ?`,
+          [durationSeconds, call.host_id],
         );
-      }
 
-      await this.finalizeCallPresence(Number(call.caller_id), Number(call.host_id));
-
-      const endPayload = this.buildEndPayload(call, {
-        durationSeconds,
-        billableMinutes: billing.billableMinutes,
-        totalAmount: amountDeducted,
-        hostEarning: billing.hostEarning,
-        platformCommission: billing.platformCommission,
-        isFreeCall,
-        freeMinutes,
-        paidMinutes,
-      });
-
-      setImmediate(() => {
-        this.socket.notifyUser(call.caller_id, 'wallet_updated', {
-          user_id: call.caller_id,
-          balance: newBalance,
-          ...(isFreeCall ? { free_call_available: false } : {}),
-        });
-        this.socket.notifyUser(call.host_id, 'earning_updated', {
-          host_id: call.host_id,
-          amount: billing.hostEarning,
-        });
-        const callerEnded = this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
-        const hostEnded = this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
-        if (!callerEnded || !hostEnded) {
-          this.logger.warn(
-            `call_ended socket missed call=${call.id} callerDelivered=${callerEnded} hostDelivered=${hostEnded}`,
+        if (billing.hostEarning > 0) {
+          await conn.query(
+            `INSERT INTO earnings (host_id, call_id, amount, type, description, status) VALUES (?, ?, ?, 'call', ?, ?)`,
+            [
+              call.host_id,
+              call.id,
+              billing.hostEarning,
+              isFreeCall ? `Call #${call.id} (paid minutes)` : `Call #${call.id}`,
+              RECORD_STATUS.ACTIVE,
+            ],
           );
         }
-      });
 
-      return {
-        success: true,
-        data: endPayload,
-      };
-    } catch (err) {
-      await conn.rollback();
-      const code = (err as { code?: string })?.code;
-      if (code === 'ER_LOCK_WAIT_TIMEOUT' || code === 'ER_LOCK_DEADLOCK') {
-        const endedRows = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
-        if (endedRows[0]?.status === 'ended') {
-          await this.finalizeCallPresence(
-            Number(endedRows[0].caller_id),
-            Number(endedRows[0].host_id),
+        await conn.commit();
+
+        if (freeCallRedeem) {
+          void this.freeCallService.redeem(freeCallRedeem).catch((err) =>
+            this.logger.warn(
+              `Free call redeem failed for call #${call.id}: ${(err as Error)?.message || err}`,
+            ),
           );
-          return { success: true, data: this.buildEndPayload(endedRows[0]) };
         }
+
+        await this.finalizeCallPresence(Number(call.caller_id), Number(call.host_id));
+
+        const endPayload = this.buildEndPayload(call, {
+          durationSeconds,
+          billableMinutes: billing.billableMinutes,
+          totalAmount: amountDeducted,
+          hostEarning: billing.hostEarning,
+          platformCommission: billing.platformCommission,
+          isFreeCall,
+          freeMinutes,
+          paidMinutes,
+        });
+
+        setImmediate(() => {
+          this.socket.notifyUser(call.caller_id, 'wallet_updated', {
+            user_id: call.caller_id,
+            balance: newBalance,
+            ...(isFreeCall ? { free_call_available: false } : {}),
+          });
+          this.socket.notifyUser(call.host_id, 'earning_updated', {
+            host_id: call.host_id,
+            amount: billing.hostEarning,
+          });
+          const callerEnded = this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
+          const hostEnded = this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
+          if (!callerEnded || !hostEnded) {
+            this.logger.warn(
+              `call_ended socket missed call=${call.id} callerDelivered=${callerEnded} hostDelivered=${hostEnded}`,
+            );
+          }
+        });
+
+        return {
+          success: true,
+          data: endPayload,
+        };
+      } catch (err) {
+        await conn.rollback();
+        const code = (err as { code?: string })?.code;
+        if (code === 'ER_LOCK_WAIT_TIMEOUT' || code === 'ER_LOCK_DEADLOCK') {
+          const endedRows = await this.db.query<any[]>(`SELECT * FROM calls WHERE id = ?`, [callId]);
+          if (endedRows[0]?.status === 'ended') {
+            await this.finalizeCallPresence(
+              Number(endedRows[0].caller_id),
+              Number(endedRows[0].host_id),
+            );
+            return { success: true, data: this.buildEndPayload(endedRows[0]) };
+          }
+        }
+        throw err;
+      } finally {
+        conn.release();
       }
-      throw err;
+    })();
+
+    this.endingCalls.set(callId, endOperation);
+    try {
+      return await endOperation;
     } finally {
-      conn.release();
+      this.endingCalls.delete(callId);
     }
   }
 
