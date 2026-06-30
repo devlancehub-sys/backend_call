@@ -567,24 +567,22 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
           paidMinutes,
         });
 
-        setImmediate(() => {
-          this.socket.notifyUser(call.caller_id, 'wallet_updated', {
-            user_id: call.caller_id,
-            balance: newBalance,
-            ...(isFreeCall ? { free_call_available: false } : {}),
-          });
-          this.socket.notifyUser(call.host_id, 'earning_updated', {
-            host_id: call.host_id,
-            amount: billing.hostEarning,
-          });
-          const callerEnded = this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
-          const hostEnded = this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
-          if (!callerEnded || !hostEnded) {
-            this.logger.warn(
-              `call_ended socket missed call=${call.id} callerDelivered=${callerEnded} hostDelivered=${hostEnded}`,
-            );
-          }
+        this.socket.notifyUser(call.caller_id, 'wallet_updated', {
+          user_id: call.caller_id,
+          balance: newBalance,
+          ...(isFreeCall ? { free_call_available: false } : {}),
         });
+        this.socket.notifyUser(call.host_id, 'earning_updated', {
+          host_id: call.host_id,
+          amount: billing.hostEarning,
+        });
+        const callerEnded = this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
+        const hostEnded = this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
+        if (!callerEnded || !hostEnded) {
+          this.logger.warn(
+            `call_ended socket missed call=${call.id} callerDelivered=${callerEnded} hostDelivered=${hostEnded}`,
+          );
+        }
 
         return {
           success: true,
