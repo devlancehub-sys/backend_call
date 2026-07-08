@@ -6,6 +6,7 @@ import { HostAccessKeyModule } from '../host-access-key/host-access-key.module';
 import { SocketModule } from '../socket/socket.module';
 import { AdminHostsController, HostAuthController } from './host-auth.controller';
 import { HostGirlsController } from './host-girls.controller';
+import { TierController } from './tier.controller';
 import { HostAuthService } from './host-auth.service';
 import { HostOtpService } from './host-otp.service';
 import { HostAvailabilityService } from './host-availability.service';
@@ -17,7 +18,7 @@ import { HostTierCronService } from './host-tier-cron.service';
 
 @Module({
   imports: [ScheduleModule.forRoot(), AuthModule, UsersModule, HostAccessKeyModule, SocketModule],
-  controllers: [HostAuthController, AdminHostsController, HostGirlsController],
+  controllers: [HostAuthController, AdminHostsController, HostGirlsController, TierController],
   providers: [
     HostAuthService,
     HostOtpService,

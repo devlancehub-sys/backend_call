@@ -1,18 +1,38 @@
 /** Creator level based on lifetime talk minutes on the platform. */
-export type HostTier = 'iron' | 'silver' | 'gold' | 'diamond';
+export enum HostTier {
+  IRON = 'iron',
+  SILVER = 'silver',
+  GOLD = 'gold',
+  DIAMOND = 'diamond',
+}
 
 export const HOST_TIER_THRESHOLDS = {
   silver: 60,
   gold: 120,
-  diamond: 280,
+  diamond: 180,
 } as const;
 
-/** Host share of per-minute call rate by creator level (remainder = platform). */
-export const HOST_SHARE_BY_TIER: Record<HostTier, number> = {
-  iron: 50,
-  silver: 55,
-  gold: 60,
+export const HOST_TIER_CALL_RATES: Record<HostTier, number> = {
+  iron: 6,
+  silver: 12,
+  gold: 18,
+  diamond: 24,
+} as const;
+
+/** Day host share of per-minute call rate by creator level (remainder = platform). */
+export const DAY_HOST_SHARE_BY_TIER: Record<HostTier, number> = {
+  iron: 45,
+  silver: 45,
+  gold: 55,
   diamond: 65,
+};
+
+/** Night host share of per-minute call rate by creator level (remainder = platform). */
+export const NIGHT_HOST_SHARE_BY_TIER: Record<HostTier, number> = {
+  iron: 50,
+  silver: 50,
+  gold: 60,
+  diamond: 70,
 };
 
 export interface HostTierProfile {
@@ -22,8 +42,11 @@ export interface HostTierProfile {
   next_tier: HostTier | null;
   next_tier_label: string | null;
   minutes_to_next_tier: number;
-  host_share_percentage: number;
-  platform_commission_percentage: number;
+  call_rate: number;
+  day_host_share_percentage: number;
+  day_platform_share_percentage: number;
+  night_host_share_percentage: number;
+  night_platform_share_percentage: number;
 }
 
 export function talkMinutesFromSeconds(totalDurationSeconds: number): number {
@@ -31,10 +54,10 @@ export function talkMinutesFromSeconds(totalDurationSeconds: number): number {
 }
 
 export function hostTierFromTalkMinutes(minutes: number): HostTier {
-  if (minutes >= HOST_TIER_THRESHOLDS.diamond) return 'diamond';
-  if (minutes >= HOST_TIER_THRESHOLDS.gold) return 'gold';
-  if (minutes >= HOST_TIER_THRESHOLDS.silver) return 'silver';
-  return 'iron';
+  if (minutes >= HOST_TIER_THRESHOLDS.diamond) return HostTier.DIAMOND;
+  if (minutes >= HOST_TIER_THRESHOLDS.gold) return HostTier.GOLD;
+  if (minutes >= HOST_TIER_THRESHOLDS.silver) return HostTier.SILVER;
+  return HostTier.IRON;
 }
 
 export function hostTierFromDurationSeconds(totalDurationSeconds: number): HostTier {
@@ -43,23 +66,35 @@ export function hostTierFromDurationSeconds(totalDurationSeconds: number): HostT
 
 export function hostTierLabel(tier: HostTier): string {
   switch (tier) {
-    case 'iron':
+    case HostTier.IRON:
       return 'Iron';
-    case 'silver':
+    case HostTier.SILVER:
       return 'Silver';
-    case 'gold':
+    case HostTier.GOLD:
       return 'Gold';
-    case 'diamond':
+    case HostTier.DIAMOND:
       return 'Diamond';
   }
 }
 
-export function hostSharePercentageForTier(tier: HostTier): number {
-  return HOST_SHARE_BY_TIER[tier];
+export function dayHostSharePercentageForTier(tier: HostTier): number {
+  return DAY_HOST_SHARE_BY_TIER[tier];
 }
 
-export function platformCommissionForTier(tier: HostTier): number {
-  return 100 - hostSharePercentageForTier(tier);
+export function dayPlatformSharePercentageForTier(tier: HostTier): number {
+  return 100 - dayHostSharePercentageForTier(tier);
+}
+
+export function nightHostSharePercentageForTier(tier: HostTier): number {
+  return NIGHT_HOST_SHARE_BY_TIER[tier];
+}
+
+export function nightPlatformSharePercentageForTier(tier: HostTier): number {
+  return 100 - nightHostSharePercentageForTier(tier);
+}
+
+export function callRateForTier(tier: HostTier): number {
+  return HOST_TIER_CALL_RATES[tier];
 }
 
 export function buildHostTierProfile(totalDurationSeconds: number): HostTierProfile {
@@ -70,19 +105,19 @@ export function buildHostTierProfile(totalDurationSeconds: number): HostTierProf
   let minutesToNext = 0;
 
   switch (creatorTier) {
-    case 'iron':
-      nextTier = 'silver';
+    case HostTier.IRON:
+      nextTier = HostTier.SILVER;
       minutesToNext = HOST_TIER_THRESHOLDS.silver - totalTalkMinutes;
       break;
-    case 'silver':
-      nextTier = 'gold';
+    case HostTier.SILVER:
+      nextTier = HostTier.GOLD;
       minutesToNext = HOST_TIER_THRESHOLDS.gold - totalTalkMinutes;
       break;
-    case 'gold':
-      nextTier = 'diamond';
+    case HostTier.GOLD:
+      nextTier = HostTier.DIAMOND;
       minutesToNext = HOST_TIER_THRESHOLDS.diamond - totalTalkMinutes;
       break;
-    case 'diamond':
+    case HostTier.DIAMOND:
       break;
   }
 
@@ -93,8 +128,11 @@ export function buildHostTierProfile(totalDurationSeconds: number): HostTierProf
     next_tier: nextTier,
     next_tier_label: nextTier ? hostTierLabel(nextTier) : null,
     minutes_to_next_tier: Math.max(0, minutesToNext),
-    host_share_percentage: hostSharePercentageForTier(creatorTier),
-    platform_commission_percentage: platformCommissionForTier(creatorTier),
+    call_rate: callRateForTier(creatorTier),
+    day_host_share_percentage: dayHostSharePercentageForTier(creatorTier),
+    day_platform_share_percentage: dayPlatformSharePercentageForTier(creatorTier),
+    night_host_share_percentage: nightHostSharePercentageForTier(creatorTier),
+    night_platform_share_percentage: nightPlatformSharePercentageForTier(creatorTier),
   };
 }
 
