@@ -13,6 +13,7 @@ import { DatabaseService } from '../database/database.service';
 import { SocketGateway } from '../socket/socket.gateway';
 import { OnlineUserManagerService } from '../socket/online-user-manager.service';
 import { calculateBilling, calculateFreeCallBilling, BillingBreakdown } from '../common/utils/billing.util';
+import { isNightTime } from '../common/utils/night-bonus.util';
 import { HostRateService } from '../host-auth/host-rate.service';
 import { FreeCallService, CallerDeviceIdentity } from '../wallet/free-call.service';
 import { ZegoTokenService } from '../zego/zego-token.service';
@@ -452,9 +453,10 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
           0,
           Math.floor((Date.now() - (Number.isFinite(startedAtMs) ? startedAtMs : Date.now())) / 1000),
         );
+        const isNight = isNightTime();
         const billing = isFreeCall
-          ? calculateFreeCallBilling(durationSeconds, ratePerMinute, billingRate.commissionPct)
-          : calculateBilling(durationSeconds, ratePerMinute, billingRate.commissionPct);
+          ? calculateFreeCallBilling(durationSeconds, ratePerMinute, billingRate.commissionPct, isNight)
+          : calculateBilling(durationSeconds, ratePerMinute, billingRate.commissionPct, isNight);
 
         const amountDeducted = isFreeCall
           ? (billing as BillingBreakdown).paidAmount

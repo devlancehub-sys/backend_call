@@ -140,3 +140,19 @@ export function withCreatorTierFields(host: Record<string, unknown>): Record<str
   const seconds = Number(host.total_duration_seconds ?? 0);
   return { ...host, ...buildHostTierProfile(seconds) };
 }
+
+/**
+ * @deprecated Use dayHostSharePercentageForTier or nightHostSharePercentageForTier instead.
+ * This function is kept for backward compatibility and defaults to day share.
+ */
+export function hostSharePercentageForTier(tier: HostTier): number {
+  return dayHostSharePercentageForTier(tier);
+}
+
+/**
+ * @deprecated Use dayPlatformSharePercentageForTier or nightPlatformSharePercentageForTier instead.
+ * This function is kept for backward compatibility and defaults to day share.
+ */
+export function platformCommissionForTier(tier: HostTier): number {
+  return dayPlatformSharePercentageForTier(tier);
+}

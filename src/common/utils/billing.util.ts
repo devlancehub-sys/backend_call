@@ -18,7 +18,7 @@ export interface BillingResult {
  * Bill by full minutes (ceil). Any connected call bills at least 1 minute.
  * Uses tier-based revenue sharing with day/night bonus.
  */
-export const calculateBilling = (
+export const calculateBillingWithTierShare = (
   durationSeconds: number,
   ratePerMinute: number,
   tierRevenueShare: TierRevenueShare,
@@ -67,6 +67,23 @@ export const calculateLegacyBilling = (
   };
 };
 
+/**
+ * @deprecated Use calculateBillingWithTierShare instead.
+ * This function is kept for backward compatibility.
+ */
+export const calculateBilling = (
+  durationSeconds: number,
+  ratePerMinute: number,
+  commissionPct: number,
+  isNight: boolean = false,
+): BillingResult => {
+  const tierRevenueShare: TierRevenueShare = {
+    hostShare: 100 - commissionPct,
+    platformShare: commissionPct,
+  };
+  return calculateBillingWithTierShare(durationSeconds, ratePerMinute, tierRevenueShare, isNight);
+};
+
 export type BillingBreakdown = {
   billableMinutes: number;
   freeMinutes: number;
@@ -84,8 +101,8 @@ export type BillingBreakdown = {
 export const calculateFreeCallBilling = (
   durationSeconds: number,
   ratePerMinute: number,
-  tierRevenueShare: TierRevenueShare,
-  isNight: boolean,
+  tierRevenueShareOrCommissionPct: TierRevenueShare | number,
+  isNight: boolean = false,
 ): BillingBreakdown => {
   const seconds = Math.max(0, Math.floor(Number.isFinite(durationSeconds) ? durationSeconds : 0));
   const freeSeconds = Math.min(seconds, FREE_CALL_MAX_SECONDS);
@@ -93,9 +110,17 @@ export const calculateFreeCallBilling = (
 
   const freeMinutes = freeSeconds > 0 ? 1 : 0;
 
+  // Handle backward compatibility with commissionPct (number) vs TierRevenueShare (object)
+  const tierRevenueShare: TierRevenueShare = typeof tierRevenueShareOrCommissionPct === 'number'
+    ? {
+        hostShare: 100 - tierRevenueShareOrCommissionPct,
+        platformShare: tierRevenueShareOrCommissionPct,
+      }
+    : tierRevenueShareOrCommissionPct;
+
   const paidPortion =
     paidSeconds > 0
-      ? calculateBilling(paidSeconds, ratePerMinute, tierRevenueShare, isNight)
+      ? calculateBillingWithTierShare(paidSeconds, ratePerMinute, tierRevenueShare, isNight)
       : {
           billableMinutes: 0,
           totalAmount: 0,

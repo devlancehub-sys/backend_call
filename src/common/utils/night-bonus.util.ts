@@ -14,18 +14,18 @@ export function isNightTime(): boolean {
 }
 
 export function getRevenueShare(tier: string, isNight: boolean): { hostShare: number; platformShare: number } {
-  const dayShares: Record<string, { host: number; platform: number }> = {
-    iron: { host: 45, platform: 55 },
-    silver: { host: 45, platform: 55 },
-    gold: { host: 55, platform: 45 },
-    diamond: { host: 65, platform: 35 },
+  const dayShares: Record<string, { hostShare: number; platformShare: number }> = {
+    iron: { hostShare: 45, platformShare: 55 },
+    silver: { hostShare: 45, platformShare: 55 },
+    gold: { hostShare: 55, platformShare: 45 },
+    diamond: { hostShare: 65, platformShare: 35 },
   };
 
-  const nightShares: Record<string, { host: number; platform: number }> = {
-    iron: { host: 50, platform: 50 },
-    silver: { host: 50, platform: 50 },
-    gold: { host: 60, platform: 40 },
-    diamond: { host: 70, platform: 30 },
+  const nightShares: Record<string, { hostShare: number; platformShare: number }> = {
+    iron: { hostShare: 50, platformShare: 50 },
+    silver: { hostShare: 50, platformShare: 50 },
+    gold: { hostShare: 60, platformShare: 40 },
+    diamond: { hostShare: 70, platformShare: 30 },
   };
 
   return isNight ? nightShares[tier] : dayShares[tier];
