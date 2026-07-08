@@ -9,17 +9,20 @@ export class TierController {
   constructor(private readonly tierService: HostTierService) {}
 
   @Get('tier')
-  async getTierInfo(@Request() req): Promise<TierInfoDto> {
-    return this.tierService.getTierInfo(req.user.id);
+  async getTierInfo(@Request() req): Promise<{ success: boolean; data: TierInfoDto }> {
+    const tierInfo = await this.tierService.getTierInfo(req.user.id);
+    return { success: true, data: tierInfo };
   }
 
   @Get('tier-progress')
-  async getTierProgress(@Request() req): Promise<TierProgressDto> {
-    return this.tierService.getTierProgress(req.user.id);
+  async getTierProgress(@Request() req): Promise<{ success: boolean; data: TierProgressDto }> {
+    const tierProgress = await this.tierService.getTierProgress(req.user.id);
+    return { success: true, data: tierProgress };
   }
 
   @Post('change-tier')
-  async changeTier(@Request() req, @Body() dto: ChangeTierDto): Promise<void> {
-    return this.tierService.changeTier(req.user.id, dto);
+  async changeTier(@Request() req, @Body() dto: ChangeTierDto): Promise<{ success: boolean; message: string }> {
+    await this.tierService.changeTier(req.user.id, dto);
+    return { success: true, message: 'Tier changed successfully' };
   }
 }

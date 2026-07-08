@@ -3,6 +3,8 @@ import { DatabaseService } from '../database/database.service';
 import {
   buildHostTierProfile,
   hostTierFromDurationSeconds,
+  hostTierFromTalkMinutes,
+  talkMinutesFromSeconds,
   HostTier,
   dayHostSharePercentageForTier,
   dayPlatformSharePercentageForTier,
@@ -29,10 +31,10 @@ export class HostTierService {
   }
 
   async getTierInfo(userId: number): Promise<TierInfoDto> {
-    const host = await this.db.query(
+    let host = await this.db.query(
       `SELECT active_tier, lifetime_talk_minutes, rate_per_minute,
               day_host_share, day_platform_share, night_host_share, night_platform_share,
-              is_content_creator, is_diamond_approved
+              is_content_creator, is_diamond_approved, total_duration_seconds
        FROM female_hosts WHERE user_id = ?`,
       [userId],
     );
@@ -42,16 +44,57 @@ export class HostTierService {
     }
 
     const h = host[0];
+    
+    // Initialize tier data if not set
+    if (!h.active_tier || h.lifetime_talk_minutes === null || h.lifetime_talk_minutes === undefined) {
+      const totalSeconds = h.total_duration_seconds || 0;
+      const totalMinutes = talkMinutesFromSeconds(totalSeconds);
+      const tier = hostTierFromTalkMinutes(totalMinutes);
+      const callRate = callRateForTier(tier);
+      const dayHostShare = dayHostSharePercentageForTier(tier);
+      const dayPlatformShare = dayPlatformSharePercentageForTier(tier);
+      const nightHostShare = nightHostSharePercentageForTier(tier);
+      const nightPlatformShare = nightPlatformSharePercentageForTier(tier);
+
+      await this.db.query(
+        `UPDATE female_hosts
+         SET active_tier = ?, lifetime_talk_minutes = ?, rate_per_minute = ?,
+             day_host_share = ?, day_platform_share = ?,
+             night_host_share = ?, night_platform_share = ?
+         WHERE user_id = ?`,
+        [
+          tier,
+          totalMinutes,
+          callRate,
+          dayHostShare,
+          dayPlatformShare,
+          nightHostShare,
+          nightPlatformShare,
+          userId,
+        ],
+      );
+
+      // Reload host data after update
+      host = await this.db.query(
+        `SELECT active_tier, lifetime_talk_minutes, rate_per_minute,
+                day_host_share, day_platform_share, night_host_share, night_platform_share,
+                is_content_creator, is_diamond_approved
+         FROM female_hosts WHERE user_id = ?`,
+        [userId],
+      );
+    }
+
+    const finalHost = host[0];
     return {
-      active_tier: h.active_tier as HostTier,
-      lifetime_talk_minutes: h.lifetime_talk_minutes,
-      call_rate: h.rate_per_minute,
-      day_host_share: h.day_host_share,
-      day_platform_share: h.day_platform_share,
-      night_host_share: h.night_host_share,
-      night_platform_share: h.night_platform_share,
-      is_content_creator: !!h.is_content_creator,
-      is_diamond_approved: !!h.is_diamond_approved,
+      active_tier: finalHost.active_tier as HostTier,
+      lifetime_talk_minutes: finalHost.lifetime_talk_minutes,
+      call_rate: finalHost.rate_per_minute,
+      day_host_share: finalHost.day_host_share,
+      day_platform_share: finalHost.day_platform_share,
+      night_host_share: finalHost.night_host_share,
+      night_platform_share: finalHost.night_platform_share,
+      is_content_creator: !!finalHost.is_content_creator,
+      is_diamond_approved: !!finalHost.is_diamond_approved,
     };
   }
 
