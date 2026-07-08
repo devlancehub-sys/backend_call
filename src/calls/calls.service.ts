@@ -148,12 +148,15 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       callerAvatarUrl: callers[0]?.avatar_url,
     });
 
+    this.logger.log(`[Call Lifecycle] New call attempt: callerId=${callerId} -> hostId=${hostId}`);
+
     const socketDelivered = this.socket.notifyUser(hostId, 'incoming_call', payload);
+    this.logger.log(`[Call Lifecycle] Call invitation socket emit: event=incoming_call to hostId=${hostId} delivered=${socketDelivered}`);
     const pushSent = await this.push.sendIncomingCall(hostId, payload);
 
     if (!socketDelivered && !pushSent) {
       this.logger.warn(
-        `Call ${callId} delivery failed for host ${hostId}: socket=${socketDelivered}, push=${pushSent}`,
+        `[Call Lifecycle] Call ${callId} delivery failed for host ${hostId}: socket=${socketDelivered}, push=${pushSent}`,
       );
       await this.db.query(`UPDATE calls SET status = 'missed', ended_at = NOW() WHERE id = ?`, [
         callId,
@@ -293,6 +296,8 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Voice call could not start. ZEGOCLOUD token error.');
     }
 
+    this.logger.log(`[Call Lifecycle] Call accept requested: callId=${callId} by userId=${userId}`);
+
     await this.db.query(
       `UPDATE calls SET status = 'active', started_at = NOW() WHERE id = ? AND status = 'ringing'`,
       [callId],
@@ -318,6 +323,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
       billingRate.hostSharePct,
     );
 
+    this.logger.log(`[Call Lifecycle] Call status active, emitting socket event: call_accepted to userId=${notifyId}`);
     this.socket.notifyUser(notifyId, 'call_accepted', {
       call_id: callId,
       room_id: roomId,
@@ -567,6 +573,7 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
           paidMinutes,
         });
 
+        this.logger.log(`[Call Lifecycle] Call ended on backend. CallId: ${call.id}`);
         this.socket.notifyUser(call.caller_id, 'wallet_updated', {
           user_id: call.caller_id,
           balance: newBalance,
@@ -578,9 +585,10 @@ export class CallsService implements OnModuleInit, OnModuleDestroy {
         });
         const callerEnded = this.socket.notifyUser(call.caller_id, 'call_ended', endPayload);
         const hostEnded = this.socket.notifyUser(call.host_id, 'call_ended', endPayload);
+        this.logger.log(`[Call Lifecycle] Call ended socket notification: event=call_ended callerDelivered=${callerEnded} hostDelivered=${hostEnded}`);
         if (!callerEnded || !hostEnded) {
           this.logger.warn(
-            `call_ended socket missed call=${call.id} callerDelivered=${callerEnded} hostDelivered=${hostEnded}`,
+            `[Call Lifecycle] call_ended socket missed call=${call.id} callerDelivered=${callerEnded} hostDelivered=${hostEnded}`,
           );
         }
 
