@@ -133,7 +133,7 @@ export class HostAuthService {
 
       const rate = this.platformSettings.getDefaultHostRate();
       await conn.query(
-        `INSERT INTO female_hosts (user_id, rate_per_minute, kyc_status, status) VALUES (?, ?, 'approved', ?)`,
+        `INSERT INTO female_hosts (user_id, active_tier, rate_per_minute, kyc_status, status) VALUES (?, 'iron', ?, 'approved', ?)`,
         [userId, rate, RECORD_STATUS.ACTIVE],
       );
 
