@@ -17,6 +17,8 @@ import { SocketModule } from './socket/socket.module';
 import { HostAuthModule } from './host-auth/host-auth.module';
 import { PromoCodesModule } from './promo-codes/promo-codes.module';
 import { PushModule } from './common/push.module';
+import { FollowsModule } from './follows/follows.module';
+import { ReferralsModule } from './referrals/referrals.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -40,6 +42,8 @@ import { AppController } from './app.controller';
     HostAuthModule,
     PromoCodesModule,
     PushModule,
+    FollowsModule,
+    ReferralsModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

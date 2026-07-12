@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { Server } from 'socket.io';
 import { DatabaseService } from '../database/database.service';
 import { RECORD_STATUS } from '../common/constants/record-status';
+import { FollowsService } from '../follows/follows.service';
 
 export type UserRole = 'male' | 'female' | 'admin' | string;
 
@@ -47,7 +48,10 @@ export class OnlineUserManagerService implements OnModuleInit, OnModuleDestroy {
   private readonly dbSyncDebounceMs = Number(process.env.SOCKET_DB_SYNC_MS) || 5_000;
   private readonly staleSweepMs = Number(process.env.SOCKET_STALE_SWEEP_MS) || 60_000;
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly followsService: FollowsService,
+  ) {}
 
   async onModuleInit() {
     try {
@@ -251,11 +255,14 @@ export class OnlineUserManagerService implements OnModuleInit, OnModuleDestroy {
     return this.isUserOnline(userId);
   }
 
-  emitPresenceOnline(userId: number, role: UserRole, isReconnect: boolean) {
+  async emitPresenceOnline(userId: number, role: UserRole, isReconnect: boolean) {
     if (!this.server || isReconnect) return;
 
     if (role === 'female') {
       this.server.to('role:male').emit('host_online', { host_id: userId });
+      const users = await this.db.query<any[]>(`SELECT name FROM users WHERE id = ?`, [userId]);
+      const hostName = users[0]?.name || 'Host';
+      void this.followsService.notifyFollowersHostOnline(userId, hostName);
     } else if (role === 'male') {
       this.server.to('role:female').emit('user_online', { user_id: userId });
     }

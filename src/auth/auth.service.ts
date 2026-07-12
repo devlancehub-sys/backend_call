@@ -5,6 +5,7 @@ import { DatabaseService } from '../database/database.service';
 import { QuickLoginDto } from './dto/auth.dto';
 import { RECORD_STATUS } from '../common/constants/record-status';
 import { FreeCallService } from '../wallet/free-call.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class AuthService {
@@ -15,6 +16,7 @@ export class AuthService {
     private jwt: JwtService,
     private config: ConfigService,
     private freeCall: FreeCallService,
+    private referrals: ReferralsService,
   ) {}
 
   /** Boys quick login — name + device_id only, no OTP */
@@ -66,6 +68,15 @@ export class AuthService {
           name,
         };
       } else {
+        let referrerId: number | null = null;
+
+        if (dto.referral_code) {
+          referrerId = await this.referrals.validateReferralCode(dto.referral_code);
+          if (!referrerId) {
+            throw new BadRequestException('Invalid referral code');
+          }
+        }
+
         const phone = `9${Date.now()}${Math.floor(Math.random() * 90 + 10)}`.slice(0, 15);
         const result = await this.db.query<any>(
           `INSERT INTO users (phone, role, name, device_id, fcm_token, status)
@@ -77,6 +88,11 @@ export class AuthService {
           'INSERT INTO wallets (user_id, balance, status) VALUES (?, 0, ?)',
           [userId, RECORD_STATUS.ACTIVE],
         );
+
+        if (referrerId && dto.referral_code) {
+          await this.referrals.createReferral(referrerId, userId, dto.referral_code);
+        }
+
         user = { id: userId, phone, role: 'male', name };
       }
 

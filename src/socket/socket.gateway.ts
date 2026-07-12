@@ -75,7 +75,7 @@ export class SocketGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       if (role === 'female') client.join('role:female');
       else if (role === 'male') client.join('role:male');
 
-      this.presence.emitPresenceOnline(userId, role, isReconnect);
+      await this.presence.emitPresenceOnline(userId, role, isReconnect);
     } catch (err) {
       this.logger.warn(`Connection rejected: ${(err as Error)?.message || err}`);
       client.disconnect(true);

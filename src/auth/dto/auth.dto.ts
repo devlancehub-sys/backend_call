@@ -15,6 +15,11 @@ export class QuickLoginDto {
   @IsOptional()
   @IsString()
   fcm_token?: string;
+
+  @ApiPropertyOptional({ example: 'ABC12345' })
+  @IsOptional()
+  @IsString()
+  referral_code?: string;
 }
 
 export class RefreshTokenDto {

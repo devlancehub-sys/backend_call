@@ -350,3 +350,48 @@ CREATE TABLE IF NOT EXISTS host_access_keys (
   UNIQUE KEY uq_hak_key  (access_key),
   CONSTRAINT fk_hak_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Follows (male users following female hosts for online notifications)
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS follows (
+  follower_id INT      NOT NULL,
+  following_id INT    NOT NULL,
+  status      ENUM('inactive','active','disabled') NOT NULL DEFAULT 'active',
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (follower_id, following_id),
+  CONSTRAINT fk_follow_follower FOREIGN KEY (follower_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_follow_following FOREIGN KEY (following_id) REFERENCES users (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Referrals (girls referring boys for commission)
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS referrals (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  referrer_id INT NOT NULL,
+  referred_user_id INT NOT NULL UNIQUE,
+  referral_code VARCHAR(20) NOT NULL,
+  total_recharge_amount DECIMAL(10,2) DEFAULT 0.00,
+  total_commission_earned DECIMAL(10,2) DEFAULT 0.00,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_ref_referrer FOREIGN KEY (referrer_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_ref_referred FOREIGN KEY (referred_user_id) REFERENCES users (id) ON DELETE CASCADE,
+  UNIQUE KEY uq_referral_code (referral_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- -------------------------------------------------------------
+-- Referral History (commission transactions)
+-- -------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS referral_history (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  referral_id INT NOT NULL,
+  recharge_id INT NOT NULL,
+  recharge_amount DECIMAL(10,2) NOT NULL,
+  commission_amount DECIMAL(10,2) NOT NULL,
+  commission_percent DECIMAL(5,2) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_rh_referral FOREIGN KEY (referral_id) REFERENCES referrals (id) ON DELETE CASCADE,
+  CONSTRAINT fk_rh_recharge FOREIGN KEY (recharge_id) REFERENCES wallet_transactions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -4,12 +4,14 @@ import { RECORD_STATUS } from '../common/constants/record-status';
 import { getRechargePack, listRechargePacks } from '../common/utils/recharge-packs.util';
 import { FreeCallService } from './free-call.service';
 import { FREE_CALL_MAX_SECONDS } from '../common/utils/billing.util';
+import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class WalletService {
   constructor(
     private db: DatabaseService,
     private freeCall: FreeCallService,
+    private referrals: ReferralsService,
   ) {}
 
   async getBalance(userId: number) {
@@ -90,12 +92,20 @@ export class WalletService {
       const newBalance = parseFloat(wallets[0].balance) + pack.credit_amount;
 
       await conn.query('UPDATE wallets SET balance = ? WHERE user_id = ?', [newBalance, userId]);
-      await conn.query(
+      const [result] = await conn.query<any>(
         `UPDATE wallet_transactions SET status = 'completed', balance_after = ?, amount = ?
          WHERE user_id = ? AND payment_id = ? AND status = 'pending'`,
         [newBalance, pack.credit_amount, userId, paymentId],
       );
+
       await conn.commit();
+
+      const transactionId = result.insertId;
+      const referral = await this.referrals.getReferralByReferredUser(userId);
+      if (referral) {
+        await this.referrals.processCommission(referral.id, transactionId, pack.pay_amount);
+      }
+
       return {
         success: true,
         data: {
