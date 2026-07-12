@@ -1,7 +1,7 @@
 import { Controller, Post, Delete, Get, Param, Body, UseGuards } from '@nestjs/common';
 import { FollowsService } from './follows.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { CurrentUser } from '../auth/current-user.decorator';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../common/decorators/current-user.decorator';
 
 @Controller('follows')
 @UseGuards(JwtAuthGuard)
