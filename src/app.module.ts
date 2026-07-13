@@ -19,6 +19,7 @@ import { PromoCodesModule } from './promo-codes/promo-codes.module';
 import { PushModule } from './common/push.module';
 import { FollowsModule } from './follows/follows.module';
 import { ReferralsModule } from './referrals/referrals.module';
+import { PaymentsModule } from './payments/payments.module';
 import { AppController } from './app.controller';
 
 @Module({
@@ -44,6 +45,7 @@ import { AppController } from './app.controller';
     PushModule,
     FollowsModule,
     ReferralsModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
