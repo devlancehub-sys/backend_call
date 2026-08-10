@@ -12,7 +12,8 @@
     "start:prod": "node dist/main",
     "migrate": "node scripts/migrate.js",
     "start:deploy": "node scripts/migrate.js && node dist/main",
-    "test:r2": "node scripts/test-r2.js"
+    "test:r2": "node scripts/test-r2.js",
+    "admin:token": "node scripts/get-admin-token.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.750.0",

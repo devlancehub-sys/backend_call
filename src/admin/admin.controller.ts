@@ -102,6 +102,12 @@ export class AdminController {
   }
 
   @UseGuards(AdminJwtAuthGuard)
+  @Get('videos')
+  listVideos(@Query() query: PaginationQueryDto) {
+    return this.adminService.listVideos(query.page ?? 1, query.limit ?? 20);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
   @Get('users')
   listUsers(@Query() query: PaginationQueryDto) {
     return this.adminService.listUsers(query.page ?? 1, query.limit ?? 20);

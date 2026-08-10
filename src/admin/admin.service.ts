@@ -46,6 +46,21 @@ interface CreatorRow extends RowDataPacket {
   created_at: Date;
 }
 
+interface AdminVideoRow extends RowDataPacket {
+  
+  id: number;
+  girl_id: number;
+  storage_key: string;
+  duration_seconds: number;
+  created_at: Date;
+  updated_at: Date;
+  creator_name: string;
+  coin_price: number;
+  creator_status: 'active' | 'inactive';
+  thumbnail_key: string | null;
+  unlock_count: number;
+}
+
 interface UserRow extends RowDataPacket {
   id: number;
   name: string;
@@ -142,6 +157,50 @@ export class AdminService {
       hasPhoto: !!row.photo_key,
       createdAt: row.created_at.toISOString(),
     }));
+
+    return paginate(data, page, limit, total);
+  }
+
+  async listVideos(page: number, limit: number) {
+    const offset = paginationOffset(page, limit);
+
+    const [countRows] = await this.db.query<RowDataPacket[]>(
+      'SELECT COUNT(*) AS total FROM videos',
+    );
+    const total = Number(countRows[0]?.total ?? 0);
+
+    const [rows] = await this.db.query<AdminVideoRow[]>(
+      `SELECT v.id, v.girl_id, v.storage_key, v.duration_seconds,
+              v.created_at, v.updated_at,
+              g.name AS creator_name, g.coin_price, g.status AS creator_status,
+              g.thumbnail_key,
+              (SELECT COUNT(*) FROM video_unlocks vu WHERE vu.girl_id = v.girl_id) AS unlock_count
+       FROM videos v
+       JOIN girls g ON g.id = v.girl_id
+       ORDER BY v.updated_at DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset],
+    );
+
+    const ttl = this.settings.getSignedUrlTtl();
+    const data = await Promise.all(
+      rows.map(async (row) => ({
+        id: row.id,
+        creatorId: row.girl_id,
+        creatorName: row.creator_name,
+        coinPrice: row.coin_price,
+        creatorActive: row.creator_status === 'active',
+        storageKey: row.storage_key,
+        r2Path: row.storage_key,
+        durationSeconds: row.duration_seconds,
+        unlockCount: Number(row.unlock_count ?? 0),
+        thumbnailUrl: row.thumbnail_key
+          ? await this.storage.getSignedUrl(row.thumbnail_key, ttl)
+          : null,
+        createdAt: row.created_at.toISOString(),
+        updatedAt: row.updated_at.toISOString(),
+      })),
+    );
 
     return paginate(data, page, limit, total);
   }
