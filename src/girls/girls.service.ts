@@ -15,6 +15,8 @@ interface GirlListRow extends RowDataPacket {
   coin_price: number;
   status: 'active' | 'inactive';
   thumbnail_key: string | null;
+
+  
 }
 
 interface GirlDetailRow extends GirlListRow {
