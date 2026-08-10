@@ -13,7 +13,7 @@ if (fs.existsSync(envPath)) {
     if (eq === -1) continue;
     const key = trimmed.slice(0, eq).trim();
     const value = trimmed.slice(eq + 1).trim();
-    if (!process.env[key]) process.env[key] = value;
+    process.env[key] = value;
   }
 }
 
@@ -35,18 +35,30 @@ async function main() {
   });
 
   await client.send(new HeadBucketCommand({ Bucket: bucket }));
-  console.log(`OK: bucket "${bucket}" is reachable`);
+  console.log(`OK: bucket "${bucket}" is reachable (read)`);
 
   const testKey = `health-check/${Date.now()}.txt`;
-  await client.send(
-    new PutObjectCommand({
-      Bucket: bucket,
-      Key: testKey,
-      Body: Buffer.from('premium-status-r2-ok'),
-      ContentType: 'text/plain',
-    }),
-  );
-  console.log(`OK: test upload succeeded (${testKey})`);
+  try {
+    await client.send(
+      new PutObjectCommand({
+        Bucket: bucket,
+        Key: testKey,
+        Body: Buffer.from('premium-status-r2-ok'),
+        ContentType: 'text/plain',
+      }),
+    );
+    console.log(`OK: test upload succeeded (${testKey})`);
+  } catch (err) {
+    console.error('WRITE FAILED:', err.message);
+    console.error('');
+    console.error('Fix in Cloudflare dashboard:');
+    console.error('  1. R2 → Manage R2 API Tokens → Delete old tokens');
+    console.error('  2. Create API token → Permission: Admin Read & Write');
+    console.error('  3. Bucket: status');
+    console.error('  4. Copy Access Key ID + Secret → Railway Variables');
+    console.error('  5. Redeploy backend');
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

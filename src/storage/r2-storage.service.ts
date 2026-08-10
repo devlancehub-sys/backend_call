@@ -68,7 +68,7 @@ export class R2StorageService {
       const message =
         error instanceof Error ? error.message : 'Unknown R2 upload error';
       throw new InternalServerErrorException(
-        `R2 upload failed: ${message}. Ensure the R2 API token has Object Read & Write access to bucket "${this.bucket}".`,
+        `R2 upload failed: ${message}. Create a NEW token in Cloudflare → R2 → Manage R2 API Tokens with permission **Admin Read & Write** (not Object Read only) for bucket "${this.bucket}", then update R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY on Railway and redeploy.`,
       );
     }
 
