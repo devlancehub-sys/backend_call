@@ -1,106 +1,129 @@
-import { Controller, Get, Put, Post, Body, Param, Query, UseGuards, HttpCode } from '@nestjs/common';
-import { ApiOperation, ApiParam, ApiQuery, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Post,
+  Put,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { AdminJwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { AdminService } from './admin.service';
-import { AdminApiKeyGuard } from '../common/guards/admin-api-key.guard';
-import { UpdateSettingsDto, UpdateUserStatusDto } from './dto/admin.dto';
+import {
+  AdminLoginDto,
+  CreateCreatorDto,
+  UpdateCreatorDto,
+} from './dto/admin.dto';
 
-@ApiTags('Admin')
-@ApiSecurity('admin-key')
 @Controller('admin')
-@UseGuards(AdminApiKeyGuard)
 export class AdminController {
-  constructor(private adminService: AdminService) {}
+  constructor(private readonly adminService: AdminService) {}
 
+  @Post('login')
+  login(@Body() dto: AdminLoginDto) {
+    return this.adminService.login(dto);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
   @Get('dashboard')
-  @ApiOperation({ summary: 'Dashboard stats' })
-  getDashboard() {
+  dashboard() {
     return this.adminService.getDashboard();
   }
 
+  @UseGuards(AdminJwtAuthGuard)
+  @Get('creators')
+  listCreators(@Query() query: PaginationQueryDto) {
+    return this.adminService.listCreators(query.page ?? 1, query.limit ?? 20);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
+  @Post('creators')
+  createCreator(@Body() dto: CreateCreatorDto) {
+    return this.adminService.createCreator(dto);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
+  @Put('creators/:id')
+  updateCreator(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateCreatorDto,
+  ) {
+    return this.adminService.updateCreator(id, dto);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
+  @Delete('creators/:id')
+  deleteCreator(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.deleteCreator(id);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
+  @Post('creators/:id/photo')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadPhoto(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.adminService.uploadPhoto(id, file);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
+  @Post('creators/:id/video')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadVideo(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.adminService.uploadVideo(id, file);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
+  @Post('creators/:id/thumbnail')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadThumbnail(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.adminService.uploadThumbnail(id, file);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
   @Get('users')
-  @ApiOperation({ summary: 'List users' })
-  @ApiQuery({ name: 'role', required: false, example: 'male' })
-  getUsers(@Query('role') role?: string) {
-    return this.adminService.getUsers(role);
+  listUsers(@Query() query: PaginationQueryDto) {
+    return this.adminService.listUsers(query.page ?? 1, query.limit ?? 20);
   }
 
-  @Get('hosts')
-  @ApiOperation({ summary: 'List female hosts' })
-  getHosts() {
-    return this.adminService.getHosts();
+  @UseGuards(AdminJwtAuthGuard)
+  @Delete('users/:id')
+  deleteUser(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.deleteUser(id);
   }
 
-  @Get('leaderboard')
-  @ApiOperation({ summary: 'Weekly creator leaderboard by talk time' })
-  getLeaderboard(@Query('limit') limit?: string) {
-    return this.adminService.getWeeklyLeaderboard(limit ? +limit : 50);
+  @UseGuards(AdminJwtAuthGuard)
+  @Get('wallet/transactions')
+  walletTransactions(@Query() query: PaginationQueryDto) {
+    return this.adminService.listWalletTransactions(
+      query.page ?? 1,
+      query.limit ?? 20,
+    );
   }
 
-  @Put('hosts/:id/promote')
-  @ApiOperation({ summary: 'Promote or demote a creator on leaderboard' })
-  @ApiParam({ name: 'id', example: 12 })
-  promoteHost(@Param('id') id: string, @Body() body: { is_featured: boolean }) {
-    return this.adminService.setHostPromoted(+id, !!body.is_featured);
+  @UseGuards(AdminJwtAuthGuard)
+  @Get('recharges')
+  recharges(@Query() query: PaginationQueryDto) {
+    return this.adminService.listRecharges(query.page ?? 1, query.limit ?? 20);
   }
 
-  @Post('leaderboard/promote-top')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Promote top weekly creators from leaderboard' })
-  promoteTopCreators(@Body() body: { limit?: number }) {
-    return this.adminService.promoteTopCreators(body?.limit ?? 10);
-  }
-
-  @Get('calls')
-  @ApiOperation({ summary: 'List all calls' })
-  getCalls() {
-    return this.adminService.getCalls();
-  }
-
-  @Get('withdrawals')
-  @ApiOperation({ summary: 'List pending withdrawals' })
-  getWithdrawals() {
-    return this.adminService.getWithdrawals();
-  }
-
-  @Put('withdrawals/:id/complete')
-  @ApiOperation({ summary: 'Mark withdrawal as completed' })
-  @ApiParam({ name: 'id', example: 5 })
-  completeWithdrawal(@Param('id') id: string) {
-    return this.adminService.completeWithdrawal(+id);
-  }
-
-  @Get('settings')
-  @ApiOperation({ summary: 'Get platform settings' })
-  getSettings() {
-    return this.adminService.getSettings();
-  }
-
-  @Put('settings')
-  @ApiOperation({ summary: 'Update platform settings' })
-  updateSettings(@Body() body: UpdateSettingsDto) {
-    return this.adminService.updateSettings(body.settings);
-  }
-
-  @Put('users/:id/status')
-  @ApiOperation({ summary: 'Set user status — inactive | active | disabled' })
-  @ApiParam({ name: 'id', example: 12 })
-  updateUserStatus(@Param('id') id: string, @Body() body: UpdateUserStatusDto) {
-    return this.adminService.updateUserStatus(+id, body.status);
-  }
-
-  @Post('data/purge-users')
-  @HttpCode(200)
-  @ApiOperation({
-    summary: 'Delete all user data — keeps admin accounts, languages, and platform settings',
-  })
-  purgeUserData() {
-    return this.adminService.purgeAllUserData();
-  }
-
-  @Post('data/clear-calls-sessions')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Delete all calls and disconnect all socket sessions' })
-  clearCallsAndSessions() {
-    return this.adminService.clearAllCallsAndSessions();
+  @UseGuards(AdminJwtAuthGuard)
+  @Get('purchases')
+  purchases(@Query() query: PaginationQueryDto) {
+    return this.adminService.listPurchases(query.page ?? 1, query.limit ?? 20);
   }
 }

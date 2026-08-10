@@ -1,19 +1,47 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsIn, IsObject } from 'class-validator';
-import { RECORD_STATUS } from '../../common/constants/record-status';
+import {
+  IsBoolean,
+  IsEmail,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  IsPositive,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
-export class UpdateSettingsDto {
-  @ApiProperty({
-    example: { COMMISSION_PERCENTAGE: '40', MIN_RECHARGE: '100' },
-    type: 'object',
-    additionalProperties: { type: 'string' },
-  })
-  @IsObject()
-  settings: Record<string, string>;
+export class AdminLoginDto {
+  @IsEmail()
+  email!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  password!: string;
 }
 
-export class UpdateUserStatusDto {
-  @ApiProperty({ enum: ['inactive', 'active', 'disabled'], example: 'active' })
-  @IsIn([RECORD_STATUS.INACTIVE, RECORD_STATUS.ACTIVE, RECORD_STATUS.DISABLED])
-  status: 'inactive' | 'active' | 'disabled';
+export class CreateCreatorDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(100)
+  name!: string;
+
+  @IsInt()
+  @IsPositive()
+  coinPrice!: number;
+}
+
+export class UpdateCreatorDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsInt()
+  @IsPositive()
+  coinPrice?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

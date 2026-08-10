@@ -1,51 +1,36 @@
-import { Controller, Get, Post, Body, Query, UseGuards, Req } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { WalletService } from './wallet.service';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { Roles } from '../common/decorators/roles.decorator';
-import { ConfirmRechargeDto, RechargeDto } from './dto/wallet.dto';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
+import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { WalletService } from './wallet.service';
+import { CreateRechargeDto, VerifyRechargeDto } from './dto/wallet.dto';
 
-@ApiTags('Wallet')
-@ApiBearerAuth('JWT')
 @Controller('wallet')
 @UseGuards(JwtAuthGuard)
 export class WalletController {
-  constructor(private walletService: WalletService) {}
+  constructor(private readonly walletService: WalletService) {}
 
-  @Get('balance')
-  @ApiOperation({ summary: 'Get wallet balance' })
-  getBalance(@Req() req: any) {
-    return this.walletService.getBalance(req.user.id);
+  @Get()
+  getBalance(@CurrentUser() user: AuthUser) {
+    return this.walletService.getBalance(user.userId);
   }
 
-  @Get('transactions')
-  @ApiOperation({ summary: 'Get wallet transaction history' })
-  @ApiQuery({ name: 'page', required: false, example: 1 })
-  @ApiQuery({ name: 'limit', required: false, example: 20 })
-  getTransactions(@Req() req: any, @Query('page') page?: number, @Query('limit') limit?: number) {
-    return this.walletService.getTransactions(req.user.id, page, limit);
-  }
-
-  @Get('recharge-packs')
-  @ApiOperation({ summary: 'List available recharge packs' })
-  getRechargePacks() {
-    return this.walletService.getRechargePacks();
+  @Get('history')
+  getHistory(@CurrentUser() user: AuthUser, @Query() query: PaginationQueryDto) {
+    return this.walletService.getHistory(
+      user.userId,
+      query.page ?? 1,
+      query.limit ?? 20,
+    );
   }
 
   @Post('recharge')
-  @ApiOperation({ summary: 'Initiate wallet recharge (boys only)' })
-  @UseGuards(RolesGuard)
-  @Roles('male')
-  recharge(@Req() req: any, @Body() body: RechargeDto) {
-    return this.walletService.recharge(req.user.id, body.amount, body.gateway);
+  createRecharge(@CurrentUser() user: AuthUser, @Body() dto: CreateRechargeDto) {
+    return this.walletService.createRechargeOrder(user.userId, dto.amountInr);
   }
 
-  @Post('recharge/confirm')
-  @ApiOperation({ summary: 'Confirm recharge after payment (boys only)' })
-  @UseGuards(RolesGuard)
-  @Roles('male')
-  confirmRecharge(@Req() req: any, @Body() body: ConfirmRechargeDto) {
-    return this.walletService.confirmRecharge(req.user.id, body.payment_id, body.amount);
+  @Post('recharge/verify')
+  verifyRecharge(@CurrentUser() user: AuthUser, @Body() dto: VerifyRechargeDto) {
+    return this.walletService.verifyRecharge(user.userId, dto);
   }
 }

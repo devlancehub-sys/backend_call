@@ -1,19 +1,41 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
+import { AuthService } from './auth.service';
+
+interface JwtPayload {
+  sub: number;
+  deviceId: string;
+  type: string;
+}
 
 @Injectable()
-export class JwtStrategy extends PassportStrategy(Strategy) {
-  constructor(config: ConfigService) {
+export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
+  constructor(
+    config: ConfigService,
+    private readonly authService: AuthService,
+  ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: config.get('JWT_SECRET') || 'dev-secret',
+      secretOrKey: config.get<string>('JWT_SECRET') ?? 'dev-jwt-secret',
     });
   }
 
-  validate(payload: { id: number; phone: string; role: string }) {
-    return payload;
+  async validate(payload: JwtPayload) {
+    if (payload.type !== 'user') {
+      throw new UnauthorizedException('Invalid token type');
+    }
+
+    const valid = await this.authService.validateUser(
+      payload.sub,
+      payload.deviceId,
+    );
+    if (!valid) {
+      throw new UnauthorizedException('Session expired');
+    }
+
+    return { userId: payload.sub, deviceId: payload.deviceId };
   }
 }

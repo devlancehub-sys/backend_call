@@ -1,14 +1,20 @@
 import { Module } from '@nestjs/common';
-import { HostAccessKeyModule } from '../host-access-key/host-access-key.module';
-import { HostAuthModule } from '../host-auth/host-auth.module';
-import { SocketModule } from '../socket/socket.module';
-import { CallsModule } from '../calls/calls.module';
+import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
+import { AppConfigModule } from '../app-config/app-config.module';
+import { StorageModule } from '../storage/storage.module';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { AdminJwtStrategy } from './admin-jwt.strategy';
 
 @Module({
-  imports: [HostAccessKeyModule, HostAuthModule, SocketModule, CallsModule],
+  imports: [
+    PassportModule.register({ defaultStrategy: 'admin-jwt' }),
+    JwtModule.register({}),
+    AppConfigModule,
+    StorageModule,
+  ],
   controllers: [AdminController],
-  providers: [AdminService],
+  providers: [AdminService, AdminJwtStrategy],
 })
 export class AdminModule {}

@@ -1,25 +1,23 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsNumber, IsPositive, IsString, IsNotEmpty } from 'class-validator';
 
-export class RechargeDto {
-  @ApiProperty({ example: 500 })
-  @IsInt()
-  @Min(1)
-  amount: number;
-
-  @ApiPropertyOptional({ example: 'razorpay' })
-  @IsOptional()
-  @IsString()
-  gateway?: string;
+export class CreateRechargeDto {
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
+  amountInr!: number;
 }
 
-export class ConfirmRechargeDto {
-  @ApiProperty({ example: 'pay_abc123' })
+export class VerifyRechargeDto {
   @IsString()
-  payment_id: string;
+  @IsNotEmpty()
+  razorpayOrderId!: string;
 
-  @ApiProperty({ example: 500 })
-  @IsInt()
-  @Min(1)
-  amount: number;
+  @IsString()
+  @IsNotEmpty()
+  razorpayPaymentId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  razorpaySignature!: string;
 }

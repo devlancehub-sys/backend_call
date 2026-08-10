@@ -2,11 +2,7 @@
 buildCommand = "npm install && npm run build"
 
 [deploy]
-startCommand = "node dist/main"
+startCommand = "npm run start:deploy"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
-
-# Railway Free Tier: ~512MB RAM, ~0.2 vCPU shared
-# Set NODE_ENV=production and DB_POOL_SIZE=5 in Railway Variables
-# Voice calls: set ZEGOCLOUD_* — see railway.env.example
