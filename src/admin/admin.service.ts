@@ -21,6 +21,13 @@ import {
   CreateCreatorDto,
   UpdateCreatorDto,
 } from './dto/admin.dto';
+import {
+  assertUploadFile,
+  extensionForMime,
+  PHOTO_UPLOAD_RULES,
+  THUMBNAIL_UPLOAD_RULES,
+  VIDEO_UPLOAD_RULES,
+} from '../common/utils/upload.util';
 
 interface AdminRow extends RowDataPacket {
   id: number;
@@ -206,20 +213,21 @@ export class AdminService {
   }
 
   async uploadPhoto(id: number, file: Express.Multer.File) {
+    const validFile = assertUploadFile(file, PHOTO_UPLOAD_RULES);
     await this.ensureCreator(id);
-    const key = `creators/${id}/photo-${Date.now()}`;
-    await this.storage.uploadObject(key, file.buffer, file.mimetype);
-    await this.db.query('UPDATE girls SET photo_key = ? WHERE id = ?', [
-      key,
-      id,
-    ]);
-    return { key };
+    const ext = extensionForMime(validFile.mimetype, 'jpg');
+    const key = `creators/${id}/photo-${Date.now()}.${ext}`;
+    await this.storage.uploadObject(key, validFile.buffer, validFile.mimetype);
+    await this.db.query('UPDATE girls SET photo_key = ? WHERE id = ?', [key, id]);
+    return this.buildUploadResponse(key, 'photo', id);
   }
 
   async uploadVideo(id: number, file: Express.Multer.File) {
+    const validFile = assertUploadFile(file, VIDEO_UPLOAD_RULES);
     await this.ensureCreator(id);
-    const key = `creators/${id}/video-${Date.now()}`;
-    await this.storage.uploadObject(key, file.buffer, file.mimetype);
+    const ext = extensionForMime(validFile.mimetype, 'mp4');
+    const key = `creators/${id}/video-${Date.now()}.${ext}`;
+    await this.storage.uploadObject(key, validFile.buffer, validFile.mimetype);
 
     await this.db.query(
       `INSERT INTO videos (girl_id, storage_key, duration_seconds)
@@ -228,19 +236,41 @@ export class AdminService {
       [id, key],
     );
 
-    return { key };
+    await this.settings.bumpGirlsVersion();
+    return this.buildUploadResponse(key, 'video', id);
   }
 
   async uploadThumbnail(id: number, file: Express.Multer.File) {
+    const validFile = assertUploadFile(file, THUMBNAIL_UPLOAD_RULES);
     await this.ensureCreator(id);
-    const key = `creators/${id}/thumbnail-${Date.now()}`;
-    await this.storage.uploadObject(key, file.buffer, file.mimetype);
+    const ext = extensionForMime(validFile.mimetype, 'jpg');
+    const key = `creators/${id}/thumbnail-${Date.now()}.${ext}`;
+    await this.storage.uploadObject(key, validFile.buffer, validFile.mimetype);
     await this.db.query('UPDATE girls SET thumbnail_key = ? WHERE id = ?', [
       key,
       id,
     ]);
     await this.settings.bumpGirlsVersion();
-    return { key };
+    return this.buildUploadResponse(key, 'thumbnail', id);
+  }
+
+  getStorageStatus() {
+    return {
+      provider: 'cloudflare-r2',
+      configured: this.storage.isConfigured(),
+      bucket: this.storage.getBucketName(),
+    };
+  }
+
+  private buildUploadResponse(key: string, type: string, creatorId: number) {
+    return {
+      success: true,
+      type,
+      creatorId,
+      key,
+      path: key,
+      storage: 'r2',
+    };
   }
 
   async listUsers(page: number, limit: number) {

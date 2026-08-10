@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   GetObjectCommand,
@@ -36,23 +40,37 @@ export class R2StorageService {
     return this.client !== null && this.bucket !== null;
   }
 
+  getBucketName(): string | null {
+    return this.bucket;
+  }
+
   async uploadObject(
     key: string,
     body: Buffer,
     contentType: string,
   ): Promise<string> {
-    if (!this.client || !this.bucket) {
-      return `stub://${key}`;
+    if (!this.isConfigured()) {
+      throw new ServiceUnavailableException(
+        'Cloudflare R2 is not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME on the server.',
+      );
     }
 
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-        Body: body,
-        ContentType: contentType,
-      }),
-    );
+    try {
+      await this.client!.send(
+        new PutObjectCommand({
+          Bucket: this.bucket!,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+        }),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown R2 upload error';
+      throw new InternalServerErrorException(
+        `R2 upload failed: ${message}. Ensure the R2 API token has Object Read & Write access to bucket "${this.bucket}".`,
+      );
+    }
 
     return key;
   }

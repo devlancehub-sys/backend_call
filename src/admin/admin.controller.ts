@@ -16,6 +16,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminJwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { AdminService } from './admin.service';
+import { UPLOAD_LIMITS } from './upload.config';
 import {
   AdminLoginDto,
   CreateCreatorDto,
@@ -65,8 +66,14 @@ export class AdminController {
   }
 
   @UseGuards(AdminJwtAuthGuard)
+  @Get('storage/status')
+  storageStatus() {
+    return this.adminService.getStorageStatus();
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
   @Post('creators/:id/photo')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS.photo }))
   uploadPhoto(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
@@ -76,7 +83,7 @@ export class AdminController {
 
   @UseGuards(AdminJwtAuthGuard)
   @Post('creators/:id/video')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS.video }))
   uploadVideo(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
@@ -86,7 +93,7 @@ export class AdminController {
 
   @UseGuards(AdminJwtAuthGuard)
   @Post('creators/:id/thumbnail')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: UPLOAD_LIMITS.thumbnail }))
   uploadThumbnail(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
