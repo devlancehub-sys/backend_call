@@ -7,7 +7,6 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { DatabaseService } from '../database/database.service';
-import { WalletService } from '../wallet/wallet.service';
 import { RegisterDeviceDto, RefreshTokenDto } from './dto/auth.dto';
 
 interface DeviceRow extends RowDataPacket {
@@ -28,15 +27,10 @@ interface UserRow extends RowDataPacket {
 
 @Injectable()
 export class AuthService {
-  /** Hardcoded testing bonus — every account gets this once. */
-  private static readonly TEST_WALLET_COINS = 600;
-  private static readonly TEST_WALLET_LABEL = 'Test wallet bonus: 600 coins';
-
   constructor(
     private readonly db: DatabaseService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-    private readonly wallet: WalletService,
   ) {}
 
   async registerDevice(dto: RegisterDeviceDto) {
@@ -51,7 +45,6 @@ export class AuthService {
 
     if (existingDevices[0]) {
       const user = existingDevices[0];
-      await this.applyTestWalletBonus(user.user_id);
       const token = this.signUserToken(user.user_id, dto.deviceId);
       return {
         token,
@@ -70,14 +63,8 @@ export class AuthService {
       const userId = userResult.insertId;
 
       await connection.query(
-        'INSERT INTO wallets (user_id, balance) VALUES (?, ?)',
-        [userId, AuthService.TEST_WALLET_COINS],
-      );
-
-      await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description)
-         VALUES (?, 'credit', ?, ?)`,
-        [userId, AuthService.TEST_WALLET_COINS, AuthService.TEST_WALLET_LABEL],
+        'INSERT INTO wallets (user_id, balance) VALUES (?, 0)',
+        [userId],
       );
 
       await connection.query(
@@ -137,24 +124,6 @@ export class AuthService {
         secret: this.config.get<string>('JWT_SECRET') ?? 'dev-jwt-secret',
         expiresIn: this.config.get('JWT_EXPIRES_IN') ?? '30d',
       },
-    );
-  }
-
-  private async applyTestWalletBonus(userId: number): Promise<void> {
-    const [rows] = await this.db.query<RowDataPacket[]>(
-      `SELECT id FROM wallet_transactions
-       WHERE user_id = ? AND description = ?
-       LIMIT 1`,
-      [userId, AuthService.TEST_WALLET_LABEL],
-    );
-    if (rows[0]) {
-      return;
-    }
-
-    await this.wallet.creditCoins(
-      userId,
-      AuthService.TEST_WALLET_COINS,
-      AuthService.TEST_WALLET_LABEL,
     );
   }
 }

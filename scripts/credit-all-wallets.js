@@ -10,7 +10,7 @@ const base =
   process.env.API_BASE?.replace(/\/$/, '') || 'https://api.talkymate.in/api';
 const email = process.env.ADMIN_EMAIL || 'admin@premiumstatus.com';
 const password = process.env.ADMIN_PASSWORD || 'Admin@123';
-const amount = Number(process.env.AMOUNT || '600');
+const amount = Number(process.env.AMOUNT || '500');
 
 async function login() {
   const response = await fetch(`${base}/admin/login`, {
