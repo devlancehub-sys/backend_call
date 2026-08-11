@@ -185,13 +185,12 @@ export class WalletService {
       );
 
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description, reference_type, reference_id)
-         VALUES (?, 'credit', ?, ?, 'recharge', ?)`,
+        `INSERT INTO wallet_transactions (user_id, type, amount, description)
+         VALUES (?, 'credit', ?, ?)`,
         [
           userId,
           recharge.coins_added,
           `Recharge ₹${recharge.amount_inr}`,
-          recharge.id,
         ],
       );
 
@@ -231,9 +230,9 @@ export class WalletService {
       );
 
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description, reference_type, reference_id)
-         VALUES (?, 'credit', ?, ?, ?, ?)`,
-        [userId, amount, description, referenceType, referenceId],
+        `INSERT INTO wallet_transactions (user_id, type, amount, description)
+         VALUES (?, 'credit', ?, ?)`,
+        [userId, amount, description],
       );
 
       await connection.commit();
@@ -273,9 +272,9 @@ export class WalletService {
       );
 
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description, reference_type, reference_id)
-         VALUES (?, 'debit', ?, ?, ?, ?)`,
-        [userId, amount, description, referenceType, referenceId],
+        `INSERT INTO wallet_transactions (user_id, type, amount, description)
+         VALUES (?, 'debit', ?, ?)`,
+        [userId, amount, description],
       );
 
       await connection.commit();

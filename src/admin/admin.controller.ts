@@ -128,6 +128,12 @@ export class AdminController {
   }
 
   @UseGuards(AdminJwtAuthGuard)
+  @Post('wallet/credit-all')
+  creditAllWallets(@Body() dto: CreditWalletDto) {
+    return this.adminService.creditAllWallets(dto.amount, dto.description);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
   @Delete('users/:id')
   deleteUser(@Param('id', ParseIntPipe) id: number) {
     return this.adminService.deleteUser(id);

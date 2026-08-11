@@ -391,6 +391,27 @@ export class AdminService {
     };
   }
 
+  async creditAllWallets(amount: number, description?: string) {
+    const [rows] = await this.db.query<RowDataPacket[]>(
+      'SELECT user_id FROM wallets ORDER BY user_id ASC',
+    );
+
+    const label = description ?? `Bulk test credit: ${amount} coins`;
+    const results: Array<{ userId: number; balance: number }> = [];
+
+    for (const row of rows) {
+      const userId = Number(row.user_id);
+      const balance = await this.wallet.creditCoins(userId, amount, label);
+      results.push({ userId, balance });
+    }
+
+    return {
+      credited: amount,
+      users: results.length,
+      results,
+    };
+  }
+
   async deleteUser(id: number) {
     const [result] = await this.db.query<ResultSetHeader>(
       'DELETE FROM users WHERE id = ?',
