@@ -385,6 +385,7 @@ export class AdminService {
     );
 
     return {
+      status: 'success',
       userId,
       credited: amount,
       balance,
@@ -406,6 +407,7 @@ export class AdminService {
     }
 
     return {
+      status: 'success',
       credited: amount,
       users: results.length,
       results,

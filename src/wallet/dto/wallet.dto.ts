@@ -21,3 +21,9 @@ export class VerifyRechargeDto {
   @IsNotEmpty()
   razorpaySignature!: string;
 }
+
+export class FailRechargeDto {
+  @IsString()
+  @IsNotEmpty()
+  razorpayOrderId!: string;
+}

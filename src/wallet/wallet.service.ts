@@ -205,6 +205,21 @@ export class WalletService {
     return { balance: await this.fetchBalance(userId) };
   }
 
+  async failRecharge(userId: number, razorpayOrderId: string) {
+    const [result] = await this.db.query<ResultSetHeader>(
+      `UPDATE recharge_history
+       SET status = 'failed'
+       WHERE user_id = ? AND razorpay_order_id = ? AND status = 'pending'`,
+      [userId, razorpayOrderId],
+    );
+
+    if (result.affectedRows === 0) {
+      throw new NotFoundException('Pending recharge order not found');
+    }
+
+    return { status: 'failed' };
+  }
+
   async creditCoins(
     userId: number,
     amount: number,
