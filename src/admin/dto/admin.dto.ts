@@ -45,14 +45,3 @@ export class UpdateCreatorDto {
   @IsBoolean()
   isActive?: boolean;
 }
-
-export class CreditWalletDto {
-  @IsInt()
-  @IsPositive()
-  amount!: number;
-
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  description?: string;
-}

@@ -206,46 +206,6 @@ export class WalletService {
     return { balance: await this.fetchBalance(userId) };
   }
 
-  async creditCoins(
-    userId: number,
-    amount: number,
-    description: string,
-    referenceType = 'admin',
-    referenceId = 0,
-  ): Promise<number> {
-    const connection = await this.db.getPool().getConnection();
-    try {
-      await connection.beginTransaction();
-
-      const [walletRows] = await connection.query<WalletRow[]>(
-        'SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE',
-        [userId],
-      );
-      if (!walletRows[0]) {
-        throw new NotFoundException('Wallet not found');
-      }
-
-      await connection.query(
-        'UPDATE wallets SET balance = balance + ? WHERE user_id = ?',
-        [amount, userId],
-      );
-
-      await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description, reference_type, reference_id)
-         VALUES (?, 'credit', ?, ?, ?, ?)`,
-        [userId, amount, description, referenceType, referenceId],
-      );
-
-      await connection.commit();
-      return Number(walletRows[0].balance ?? 0) + amount;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
   async debitCoins(
     userId: number,
     amount: number,
