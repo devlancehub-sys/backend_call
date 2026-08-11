@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
   user_id INT NOT NULL,
   type ENUM('credit', 'debit') NOT NULL,
   amount INT NOT NULL,
+  balance_after INT NULL,
   description VARCHAR(255) NULL,
   reference_type VARCHAR(50) NULL,
   reference_id INT NULL,

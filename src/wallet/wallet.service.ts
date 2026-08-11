@@ -210,12 +210,19 @@ export class WalletService {
         [recharge.coins_added, userId],
       );
 
+      const [balanceRows] = await connection.query<WalletRow[]>(
+        'SELECT balance FROM wallets WHERE user_id = ? LIMIT 1',
+        [userId],
+      );
+      const balanceAfter = Number(balanceRows[0]?.balance ?? 0);
+
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description)
-         VALUES (?, 'credit', ?, ?)`,
+        `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, description)
+         VALUES (?, 'credit', ?, ?, ?)`,
         [
           userId,
           recharge.coins_added,
+          balanceAfter,
           `Recharge ₹${recharge.amount_inr}`,
         ],
       );
@@ -297,14 +304,16 @@ export class WalletService {
         [amount, userId],
       );
 
+      const balanceAfter = balance - amount;
+
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description)
-         VALUES (?, 'debit', ?, ?)`,
-        [userId, amount, description],
+        `INSERT INTO wallet_transactions (user_id, type, amount, balance_after, description)
+         VALUES (?, 'debit', ?, ?, ?)`,
+        [userId, amount, balanceAfter, description],
       );
 
       await connection.commit();
-      return balance - amount;
+      return balanceAfter;
     } catch (error) {
       await connection.rollback();
       throw error;
