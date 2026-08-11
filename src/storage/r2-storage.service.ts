@@ -30,6 +30,8 @@ export class R2StorageService {
         region: 'auto',
         endpoint: `https://${this.accountId}.r2.cloudflarestorage.com`,
         credentials: { accessKeyId, secretAccessKey },
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
       });
     } else {
       this.client = null;
@@ -88,7 +90,15 @@ export class R2StorageService {
 
     return getSignedUrl(
       this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        ...(key.endsWith('.mp4')
+          ? { ResponseContentType: 'video/mp4' }
+          : key.endsWith('.webm')
+            ? { ResponseContentType: 'video/webm' }
+            : {}),
+      }),
       { expiresIn: expiresInSeconds },
     );
   }

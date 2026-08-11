@@ -66,7 +66,15 @@ async function applySqlFile(connection, filePath, recordName) {
   const statements = splitStatements(sql);
 
   for (const statement of statements) {
-    await connection.query(statement);
+    try {
+      await connection.query(statement);
+    } catch (error) {
+      if (error && error.code === 'ER_DUP_FIELDNAME') {
+        console.warn(`skip duplicate column: ${error.message}`);
+        continue;
+      }
+      throw error;
+    }
   }
 
   if (recordName) {

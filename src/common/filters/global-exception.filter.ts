@@ -34,6 +34,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
+      const sqlError = exception as Error & { code?: string };
+      if (sqlError.code === 'ER_BAD_FIELD_ERROR') {
+        statusCode = HttpStatus.BAD_REQUEST;
+        message =
+          'Database schema mismatch. Redeploy backend so migrations can run, then try again.';
+      } else if (sqlError.code === 'ER_NO_SUCH_TABLE') {
+        statusCode = HttpStatus.SERVICE_UNAVAILABLE;
+        message = 'Database tables are missing. Run backend migrations on the server.';
+      }
     }
 
     response.status(statusCode).json({

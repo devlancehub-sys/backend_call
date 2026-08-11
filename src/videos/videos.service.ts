@@ -76,6 +76,11 @@ export class VideosService {
     try {
       await connection.beginTransaction();
 
+      await connection.query(
+        'INSERT IGNORE INTO wallets (user_id, balance) VALUES (?, 0)',
+        [userId],
+      );
+
       const [walletRows] = await connection.query<RowDataPacket[]>(
         'SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE',
         [userId],
@@ -143,6 +148,12 @@ export class VideosService {
       video.storage_key,
       expiresIn,
     );
+
+    if (!streamUrl || streamUrl.includes('stub.r2.local')) {
+      throw new BadRequestException(
+        'Video stream is not available. Check R2 configuration on the server.',
+      );
+    }
 
     return {
       streamUrl,

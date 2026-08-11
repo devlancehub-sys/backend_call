@@ -36,6 +36,15 @@ interface RechargeRow extends RowDataPacket {
   status: string;
 }
 
+/** ₹1 test pack for Razorpay — 9000 coins; other packs use COINS_PER_INR rate. */
+const RECHARGE_PACKS = [
+  { amountInr: 1, coins: 9000 },
+  { amountInr: 49, coins: 490 },
+  { amountInr: 99, coins: 990 },
+  { amountInr: 199, coins: 1990 },
+  { amountInr: 499, coins: 4990 },
+] as const;
+
 @Injectable()
 export class WalletService {
   private razorpay: Razorpay | null = null;
@@ -57,7 +66,15 @@ export class WalletService {
     return { balance: Number(balance) };
   }
 
+  async ensureWallet(userId: number): Promise<void> {
+    await this.db.query(
+      'INSERT IGNORE INTO wallets (user_id, balance) VALUES (?, 0)',
+      [userId],
+    );
+  }
+
   async fetchBalance(userId: number): Promise<number> {
+    await this.ensureWallet(userId);
     const [rows] = await this.db.query<WalletRow[]>(
       'SELECT balance FROM wallets WHERE user_id = ? LIMIT 1',
       [userId],
@@ -99,7 +116,7 @@ export class WalletService {
   }
 
   async createRechargeOrder(userId: number, amountInr: number) {
-    const coinsAdded = Math.floor(amountInr * this.settings.getCoinsPerInr());
+    const coinsAdded = this.resolveCoinsForAmount(amountInr);
     const amountPaise = Math.round(amountInr * 100);
 
     const [insertResult] = await this.db.query<ResultSetHeader>(
@@ -177,6 +194,11 @@ export class WalletService {
       await connection.beginTransaction();
 
       await connection.query(
+        'INSERT IGNORE INTO wallets (user_id, balance) VALUES (?, 0)',
+        [userId],
+      );
+
+      await connection.query(
         `UPDATE recharge_history
          SET status = 'success', razorpay_payment_id = ?
          WHERE id = ? AND status = 'pending'`,
@@ -232,8 +254,16 @@ export class WalletService {
     return {
       keyId: this.config.get<string>('RAZORPAY_KEY_ID', ''),
       coinsPerInr: this.settings.getCoinsPerInr(),
-      packs: [49, 99, 199, 499],
+      packs: RECHARGE_PACKS.map((pack) => ({ ...pack })),
     };
+  }
+
+  private resolveCoinsForAmount(amountInr: number): number {
+    const pack = RECHARGE_PACKS.find((entry) => entry.amountInr === amountInr);
+    if (pack) {
+      return pack.coins;
+    }
+    return Math.floor(amountInr * this.settings.getCoinsPerInr());
   }
 
   async debitCoins(
@@ -246,6 +276,11 @@ export class WalletService {
     const connection = await this.db.getPool().getConnection();
     try {
       await connection.beginTransaction();
+
+      await connection.query(
+        'INSERT IGNORE INTO wallets (user_id, balance) VALUES (?, 0)',
+        [userId],
+      );
 
       const [walletRows] = await connection.query<WalletRow[]>(
         'SELECT balance FROM wallets WHERE user_id = ? FOR UPDATE',

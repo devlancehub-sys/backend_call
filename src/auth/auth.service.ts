@@ -45,6 +45,10 @@ export class AuthService {
 
     if (existingDevices[0]) {
       const user = existingDevices[0];
+      await this.db.query(
+        'INSERT IGNORE INTO wallets (user_id, balance) VALUES (?, 0)',
+        [user.user_id],
+      );
       const token = this.signUserToken(user.user_id, dto.deviceId);
       return {
         token,
