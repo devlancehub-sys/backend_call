@@ -98,9 +98,14 @@ export class VideosService {
       );
 
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description)
-         VALUES (?, 'debit', ?, ?)`,
-        [userId, girl.coin_price, `Unlock video: ${girl.name}`],
+        `INSERT INTO wallet_transactions (user_id, type, amount, description, reference_type, reference_id)
+         VALUES (?, 'debit', ?, ?, 'video_unlock', ?)`,
+        [
+          userId,
+          girl.coin_price,
+          `Unlock video: ${girl.name}`,
+          unlockId,
+        ],
       );
 
       await connection.commit();
