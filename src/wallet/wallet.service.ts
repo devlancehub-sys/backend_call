@@ -54,7 +54,7 @@ export class WalletService {
 
   async getBalance(userId: number): Promise<{ balance: number }> {
     const balance = await this.fetchBalance(userId);
-    return { balance };
+    return { balance: Number(balance) };
   }
 
   async fetchBalance(userId: number): Promise<number> {
@@ -62,7 +62,7 @@ export class WalletService {
       'SELECT balance FROM wallets WHERE user_id = ? LIMIT 1',
       [userId],
     );
-    return rows[0]?.balance ?? 0;
+    return Number(rows[0]?.balance ?? 0);
   }
 
   async getHistory(
@@ -153,7 +153,11 @@ export class WalletService {
     }
 
     if (recharge.status === 'success') {
-      return { balance: await this.fetchBalance(userId) };
+      return {
+        status: 'success',
+        balance: await this.fetchBalance(userId),
+        coinsAdded: recharge.coins_added,
+      };
     }
 
     const secret = this.config.get<string>('RAZORPAY_KEY_SECRET', '');
@@ -185,13 +189,12 @@ export class WalletService {
       );
 
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description, reference_type, reference_id)
-         VALUES (?, 'credit', ?, ?, 'recharge', ?)`,
+        `INSERT INTO wallet_transactions (user_id, type, amount, description)
+         VALUES (?, 'credit', ?, ?)`,
         [
           userId,
           recharge.coins_added,
           `Recharge ₹${recharge.amount_inr}`,
-          recharge.id,
         ],
       );
 
@@ -203,7 +206,34 @@ export class WalletService {
       connection.release();
     }
 
-    return { balance: await this.fetchBalance(userId) };
+    return {
+      status: 'success',
+      balance: await this.fetchBalance(userId),
+      coinsAdded: recharge.coins_added,
+    };
+  }
+
+  async failRecharge(userId: number, razorpayOrderId: string) {
+    const [result] = await this.db.query<ResultSetHeader>(
+      `UPDATE recharge_history
+       SET status = 'failed'
+       WHERE user_id = ? AND razorpay_order_id = ? AND status = 'pending'`,
+      [userId, razorpayOrderId],
+    );
+
+    if (result.affectedRows === 0) {
+      throw new NotFoundException('Pending recharge order not found');
+    }
+
+    return { status: 'failed' };
+  }
+
+  async getRechargeConfig() {
+    return {
+      keyId: this.config.get<string>('RAZORPAY_KEY_ID', ''),
+      coinsPerInr: this.settings.getCoinsPerInr(),
+      packs: [49, 99, 199, 499],
+    };
   }
 
   async debitCoins(
@@ -233,9 +263,9 @@ export class WalletService {
       );
 
       await connection.query(
-        `INSERT INTO wallet_transactions (user_id, type, amount, description, reference_type, reference_id)
-         VALUES (?, 'debit', ?, ?, ?, ?)`,
-        [userId, amount, description, referenceType, referenceId],
+        `INSERT INTO wallet_transactions (user_id, type, amount, description)
+         VALUES (?, 'debit', ?, ?)`,
+        [userId, amount, description],
       );
 
       await connection.commit();
