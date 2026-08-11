@@ -3,7 +3,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { WalletService } from './wallet.service';
-import { CreateRechargeDto, FailRechargeDto, VerifyRechargeDto } from './dto/wallet.dto';
+import { CreateRechargeDto, VerifyRechargeDto } from './dto/wallet.dto';
 
 @Controller('wallet')
 @UseGuards(JwtAuthGuard)
@@ -32,10 +32,5 @@ export class WalletController {
   @Post('recharge/verify')
   verifyRecharge(@CurrentUser() user: AuthUser, @Body() dto: VerifyRechargeDto) {
     return this.walletService.verifyRecharge(user.userId, dto);
-  }
-
-  @Post('recharge/fail')
-  failRecharge(@CurrentUser() user: AuthUser, @Body() dto: FailRechargeDto) {
-    return this.walletService.failRecharge(user.userId, dto.razorpayOrderId);
   }
 }
