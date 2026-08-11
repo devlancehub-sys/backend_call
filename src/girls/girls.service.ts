@@ -14,14 +14,14 @@ interface GirlListRow extends RowDataPacket {
   name: string;
   coin_price: number;
   status: 'active' | 'inactive';
+  photo_key: string | null;
   thumbnail_key: string | null;
-
-  
 }
 
 interface GirlDetailRow extends GirlListRow {
   about: string | null;
   photo_key: string | null;
+  video_id: number | null;
   video_duration: number | null;
   is_unlocked: number;
 }
@@ -48,7 +48,7 @@ export class GirlsService {
     const total = Number(countRows[0]?.total ?? 0);
 
     const [rows] = await this.db.query<GirlListRow[]>(
-      `SELECT id, name, coin_price, status, thumbnail_key
+      `SELECT id, name, coin_price, status, photo_key, thumbnail_key
        FROM girls
        WHERE status = 'active'
        ORDER BY id DESC
@@ -62,6 +62,11 @@ export class GirlsService {
         name: row.name,
         coinPrice: row.coin_price,
         status: row.status,
+        profilePhotoUrl: row.photo_key
+          ? await this.storage.getSignedUrl(row.photo_key, ttl)
+          : row.thumbnail_key
+            ? await this.storage.getSignedUrl(row.thumbnail_key, ttl)
+            : null,
         thumbnailUrl: row.thumbnail_key
           ? await this.storage.getSignedUrl(row.thumbnail_key, ttl)
           : null,
@@ -77,6 +82,7 @@ export class GirlsService {
     const [rows] = await this.db.query<GirlDetailRow[]>(
       `SELECT g.id, g.name, g.coin_price, g.status, g.about,
               g.thumbnail_key, g.photo_key,
+              v.id AS video_id,
               v.duration_seconds AS video_duration,
               CASE WHEN vu.id IS NULL THEN 0 ELSE 1 END AS is_unlocked
        FROM girls g
@@ -104,7 +110,9 @@ export class GirlsService {
       profilePhotoUrl: row.photo_key
         ? await this.storage.getSignedUrl(row.photo_key, ttl)
         : null,
+      hasVideo: row.video_id !== null,
       isUnlocked: row.is_unlocked === 1,
+      durationSeconds: row.video_duration ?? 0,
       videoDurationSeconds: row.video_duration ?? 0,
     };
   }
