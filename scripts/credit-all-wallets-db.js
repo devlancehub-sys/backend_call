@@ -24,7 +24,7 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const amount = Number(process.env.AMOUNT || '500');
+const amount = Number(process.env.AMOUNT || '600');
 const description =
   process.env.DESCRIPTION || `Bulk test credit: ${amount} coins`;
 
