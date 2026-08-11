@@ -11,6 +11,7 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { AppSettingsService } from '../app-config/app-settings.service';
 import { DatabaseService } from '../database/database.service';
 import { R2StorageService } from '../storage/r2-storage.service';
+import { WalletService } from '../wallet/wallet.service';
 import {
   paginate,
   paginationOffset,
@@ -76,6 +77,7 @@ export class AdminService {
     private readonly config: ConfigService,
     private readonly settings: AppSettingsService,
     private readonly storage: R2StorageService,
+    private readonly wallet: WalletService,
   ) {}
 
   async login(dto: AdminLoginDto) {
@@ -357,6 +359,36 @@ export class AdminService {
     }));
 
     return paginate(data, page, limit, total);
+  }
+
+  async creditUserWallet(
+    userId: number,
+    amount: number,
+    description?: string,
+  ) {
+    const [rows] = await this.db.query<UserRow[]>(
+      `SELECT u.id, u.name, COALESCE(w.balance, 0) AS balance, u.created_at
+       FROM users u
+       LEFT JOIN wallets w ON w.user_id = u.id
+       WHERE u.id = ?
+       LIMIT 1`,
+      [userId],
+    );
+    if (!rows[0]) {
+      throw new NotFoundException('User not found');
+    }
+
+    const balance = await this.wallet.creditCoins(
+      userId,
+      amount,
+      description ?? `Admin credit: ${amount} coins`,
+    );
+
+    return {
+      userId,
+      credited: amount,
+      balance,
+    };
   }
 
   async deleteUser(id: number) {

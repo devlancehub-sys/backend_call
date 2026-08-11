@@ -20,6 +20,7 @@ import { UPLOAD_LIMITS } from './upload.config';
 import {
   AdminLoginDto,
   CreateCreatorDto,
+  CreditWalletDto,
   UpdateCreatorDto,
 } from './dto/admin.dto';
 
@@ -111,6 +112,19 @@ export class AdminController {
   @Get('users')
   listUsers(@Query() query: PaginationQueryDto) {
     return this.adminService.listUsers(query.page ?? 1, query.limit ?? 20);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
+  @Post('users/:id/wallet/credit')
+  creditUserWallet(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreditWalletDto,
+  ) {
+    return this.adminService.creditUserWallet(
+      id,
+      dto.amount,
+      dto.description,
+    );
   }
 
   @UseGuards(AdminJwtAuthGuard)
