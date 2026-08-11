@@ -85,7 +85,9 @@ export class R2StorageService {
     }
 
     if (!this.client || !this.bucket) {
-      return `https://stub.r2.local/${encodeURIComponent(key)}`;
+      throw new ServiceUnavailableException(
+        'Cloudflare R2 is not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET_NAME on the server.',
+      );
     }
 
     return getSignedUrl(

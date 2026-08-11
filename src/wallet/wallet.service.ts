@@ -36,7 +36,7 @@ interface RechargeRow extends RowDataPacket {
   status: string;
 }
 
-/** ₹1 test pack for Razorpay — 9000 coins; other packs use COINS_PER_INR rate. */
+/** Live recharge packs — amountInr and coins credited after successful payment. */
 const RECHARGE_PACKS = [
   { amountInr: 1, coins: 9000 },
   { amountInr: 49, coins: 490 },

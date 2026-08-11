@@ -1,6 +1,6 @@
--- Default admin: admin@premiumstatus.com / Admin@123
-INSERT INTO admins (email, password_hash, name)
-SELECT 'admin@premiumstatus.com', '$2b$10$pRUFJtpcmFf.FtfDkI8NquAAeSpK3CrYfflyNWyShLcVCo5AH9jrW', 'Admin'
-WHERE NOT EXISTS (
-  SELECT 1 FROM admins WHERE email = 'admin@premiumstatus.com'
-);
+-- Admin account is created after db reset via migrate seeds.
+-- Set these env vars on Railway before first deploy / after reset:
+--   ADMIN_SEED_EMAIL=your@email.com
+--   ADMIN_SEED_PASSWORD=your-secure-password
+--
+-- Or run: npm run admin:seed (after setting env vars)

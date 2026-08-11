@@ -149,7 +149,7 @@ export class VideosService {
       expiresIn,
     );
 
-    if (!streamUrl || streamUrl.includes('stub.r2.local')) {
+    if (!streamUrl) {
       throw new BadRequestException(
         'Video stream is not available. Check R2 configuration on the server.',
       );
