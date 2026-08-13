@@ -38,7 +38,6 @@ interface RechargeRow extends RowDataPacket {
 
 /** Live recharge packs — amountInr and coins credited after successful payment. */
 const RECHARGE_PACKS = [
-  { amountInr: 1, coins: 9000 },
   { amountInr: 49, coins: 490 },
   { amountInr: 99, coins: 990 },
   { amountInr: 199, coins: 1990 },
