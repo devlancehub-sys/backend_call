@@ -43,6 +43,7 @@ const RECHARGE_PACKS = [
   { amountInr: 99, coins: 990 },
   { amountInr: 199, coins: 1990 },
   { amountInr: 499, coins: 4990 },
+  { amountInr: 999, coins: 9990 },
 ] as const;
 
 @Injectable()

@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
-import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { RowDataPacket, ResultSetHeader, PoolConnection } from 'mysql2/promise';
 import { AppSettingsService } from '../app-config/app-settings.service';
 import { DatabaseService } from '../database/database.service';
 import { R2StorageService } from '../storage/r2-storage.service';
@@ -68,6 +68,25 @@ interface UserRow extends RowDataPacket {
   created_at: Date;
 }
 
+interface UserIdentityRow extends RowDataPacket {
+  id: number;
+  name: string;
+}
+
+interface CountRow extends RowDataPacket {
+  total: number;
+}
+
+interface RechargeRow extends RowDataPacket {
+  id: number;
+  user_id: number;
+  user_name: string;
+  amount_inr: number;
+  coins_added: number;
+  status: string;
+  created_at: Date;
+}
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -118,15 +137,23 @@ export class AdminService {
       'SELECT COUNT(*) AS total FROM video_unlocks',
     );
     const [rechargeStats] = await this.db.query<RowDataPacket[]>(
-      "SELECT COUNT(*) AS total, COALESCE(SUM(amount_inr), 0) AS revenue FROM recharge_history WHERE status = 'success'",
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(amount_inr), 0) AS revenue,
+              COALESCE(SUM(coins_added), 0) AS coins
+       FROM recharge_history
+       WHERE status = 'success'`,
     );
+
+    const revenue = Number(rechargeStats[0]?.revenue ?? 0);
 
     return {
       totalUsers: Number(userCount[0]?.total ?? 0),
       activeCreators: Number(creatorCount[0]?.total ?? 0),
       totalUnlocks: Number(unlockCount[0]?.total ?? 0),
       successfulRecharges: Number(rechargeStats[0]?.total ?? 0),
-      totalRevenueInr: Number(rechargeStats[0]?.revenue ?? 0),
+      totalRevenueInr: revenue,
+      totalRechargeInr: revenue,
+      totalCoinsRecharged: Number(rechargeStats[0]?.coins ?? 0),
     };
   }
 
@@ -360,14 +387,83 @@ export class AdminService {
   }
 
   async deleteUser(id: number) {
-    const [result] = await this.db.query<ResultSetHeader>(
-      'DELETE FROM users WHERE id = ?',
-      [id],
-    );
-    if (result.affectedRows === 0) {
-      throw new NotFoundException('User not found');
+    return this.purgeUserData(id);
+  }
+
+  /** Removes a user and all related data: call history, wallet, recharges, devices. */
+  async purgeUserData(id: number) {
+    const connection = await this.db.getPool().getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      const [userRows] = await connection.query<UserIdentityRow[]>(
+        'SELECT id, name FROM users WHERE id = ? LIMIT 1',
+        [id],
+      );
+      const user = userRows[0];
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const deleted = {
+        callHistory: await this.countForUser(connection, 'video_unlocks', id),
+        walletTransactions: await this.countForUser(
+          connection,
+          'wallet_transactions',
+          id,
+        ),
+        recharges: await this.countForUser(connection, 'recharge_history', id),
+        devices: await this.countForUser(connection, 'devices', id),
+        wallet: await this.countForUser(connection, 'wallets', id),
+      };
+
+      await connection.query('DELETE FROM video_unlocks WHERE user_id = ?', [id]);
+      await connection.query(
+        'DELETE FROM wallet_transactions WHERE user_id = ?',
+        [id],
+      );
+      await connection.query('DELETE FROM recharge_history WHERE user_id = ?', [id]);
+      await connection.query('DELETE FROM wallets WHERE user_id = ?', [id]);
+      await connection.query('DELETE FROM devices WHERE user_id = ?', [id]);
+
+      const [userDelete] = await connection.query<ResultSetHeader>(
+        'DELETE FROM users WHERE id = ?',
+        [id],
+      );
+      if (userDelete.affectedRows === 0) {
+        throw new NotFoundException('User not found');
+      }
+
+      await connection.commit();
+
+      return {
+        success: true,
+        userId: user.id,
+        userName: user.name,
+        deleted: {
+          ...deleted,
+          user: 1,
+        },
+      };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-    return { success: true };
+  }
+
+  private async countForUser(
+    connection: PoolConnection,
+    table: string,
+    userId: number,
+  ): Promise<number> {
+    const [rows] = await connection.query<CountRow[]>(
+      `SELECT COUNT(*) AS total FROM ${table} WHERE user_id = ?`,
+      [userId],
+    );
+    return Number(rows[0]?.total ?? 0);
   }
 
   async listWalletTransactions(page: number, limit: number) {
@@ -389,43 +485,83 @@ export class AdminService {
     return paginate(rows, page, limit, total);
   }
 
-  async listRecharges(page: number, limit: number) {
+  async listRecharges(
+    page: number,
+    limit: number,
+    fromDate?: string,
+    toDate?: string,
+  ) {
     const offset = paginationOffset(page, limit);
+    const { whereClause, params } = this.buildRechargeDateFilter(fromDate, toDate);
 
     const [countRows] = await this.db.query<RowDataPacket[]>(
-      'SELECT COUNT(*) AS total FROM recharge_history',
+      `SELECT COUNT(*) AS total
+       FROM recharge_history rh
+       JOIN users u ON u.id = rh.user_id
+       ${whereClause}`,
+      params,
     );
     const total = Number(countRows[0]?.total ?? 0);
 
-    const [rows] = await this.db.query<RowDataPacket[]>(
-      `SELECT id, user_id, amount_inr, coins_added, status, created_at
-       FROM recharge_history
-       ORDER BY created_at DESC
-       LIMIT ? OFFSET ?`,
-      [limit, offset],
+    const [summaryRows] = await this.db.query<RowDataPacket[]>(
+      `SELECT COUNT(*) AS total,
+              COALESCE(SUM(rh.amount_inr), 0) AS revenue,
+              COALESCE(SUM(rh.coins_added), 0) AS coins
+       FROM recharge_history rh
+       ${whereClause}${whereClause ? ' AND' : ' WHERE'} rh.status = 'success'`,
+      params,
     );
 
-    return paginate(rows, page, limit, total);
+    const [rows] = await this.db.query<RechargeRow[]>(
+      `SELECT rh.id, rh.user_id, u.name AS user_name,
+              rh.amount_inr, rh.coins_added, rh.status, rh.created_at
+       FROM recharge_history rh
+       JOIN users u ON u.id = rh.user_id
+       ${whereClause}
+       ORDER BY rh.created_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+
+    const data = rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      userName: row.user_name,
+      amountInr: Number(row.amount_inr),
+      coinsAdded: row.coins_added,
+      status: row.status,
+      createdAt: row.created_at.toISOString(),
+    }));
+
+    return {
+      ...paginate(data, page, limit, total),
+      summary: {
+        successfulCount: Number(summaryRows[0]?.total ?? 0),
+        totalInr: Number(summaryRows[0]?.revenue ?? 0),
+        totalCoins: Number(summaryRows[0]?.coins ?? 0),
+        fromDate: fromDate ?? null,
+        toDate: toDate ?? null,
+      },
+    };
   }
 
-  async listPurchases(page: number, limit: number) {
-    const offset = paginationOffset(page, limit);
+  private buildRechargeDateFilter(fromDate?: string, toDate?: string) {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
 
-    const [countRows] = await this.db.query<RowDataPacket[]>(
-      'SELECT COUNT(*) AS total FROM video_unlocks',
-    );
-    const total = Number(countRows[0]?.total ?? 0);
+    if (fromDate) {
+      conditions.push('DATE(rh.created_at) >= ?');
+      params.push(fromDate);
+    }
+    if (toDate) {
+      conditions.push('DATE(rh.created_at) <= ?');
+      params.push(toDate);
+    }
 
-    const [rows] = await this.db.query<RowDataPacket[]>(
-      `SELECT vu.id, vu.girl_id, g.name AS girl_name, vu.coins_spent, vu.created_at
-       FROM video_unlocks vu
-       JOIN girls g ON g.id = vu.girl_id
-       ORDER BY vu.created_at DESC
-       LIMIT ? OFFSET ?`,
-      [limit, offset],
-    );
-
-    return paginate(rows, page, limit, total);
+    return {
+      whereClause: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
+      params,
+    };
   }
 
   private async ensureCreator(id: number) {

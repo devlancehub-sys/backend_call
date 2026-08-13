@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Put, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { ProfileService } from './profile.service';
@@ -17,5 +17,10 @@ export class ProfileController {
   @Put()
   updateProfile(@CurrentUser() user: AuthUser, @Body() dto: UpdateProfileDto) {
     return this.profileService.updateProfile(user.userId, dto.name);
+  }
+
+  @Delete()
+  deleteAccount(@CurrentUser() user: AuthUser) {
+    return this.profileService.deleteAccount(user.userId);
   }
 }

@@ -15,6 +15,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AdminJwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
+import { RechargeListQueryDto } from './dto/recharge-list-query.dto';
 import { AdminService } from './admin.service';
 import { UPLOAD_LIMITS } from './upload.config';
 import {
@@ -120,6 +121,12 @@ export class AdminController {
   }
 
   @UseGuards(AdminJwtAuthGuard)
+  @Delete('users/:id/data')
+  purgeUserData(@Param('id', ParseIntPipe) id: number) {
+    return this.adminService.purgeUserData(id);
+  }
+
+  @UseGuards(AdminJwtAuthGuard)
   @Get('wallet/transactions')
   walletTransactions(@Query() query: PaginationQueryDto) {
     return this.adminService.listWalletTransactions(
@@ -130,13 +137,12 @@ export class AdminController {
 
   @UseGuards(AdminJwtAuthGuard)
   @Get('recharges')
-  recharges(@Query() query: PaginationQueryDto) {
-    return this.adminService.listRecharges(query.page ?? 1, query.limit ?? 20);
-  }
-
-  @UseGuards(AdminJwtAuthGuard)
-  @Get('purchases')
-  purchases(@Query() query: PaginationQueryDto) {
-    return this.adminService.listPurchases(query.page ?? 1, query.limit ?? 20);
+  recharges(@Query() query: RechargeListQueryDto) {
+    return this.adminService.listRecharges(
+      query.page ?? 1,
+      query.limit ?? 20,
+      query.fromDate,
+      query.toDate,
+    );
   }
 }

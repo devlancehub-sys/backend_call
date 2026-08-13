@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { DatabaseService } from '../database/database.service';
 
 interface ProfileRow extends RowDataPacket {
@@ -40,5 +40,16 @@ export class ProfileService {
       userId,
     ]);
     return this.getProfile(userId);
+  }
+
+  async deleteAccount(userId: number) {
+    const [result] = await this.db.query<ResultSetHeader>(
+      'DELETE FROM users WHERE id = ?',
+      [userId],
+    );
+    if (result.affectedRows === 0) {
+      throw new NotFoundException('User not found');
+    }
+    return { success: true };
   }
 }

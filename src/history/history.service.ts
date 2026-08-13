@@ -14,7 +14,7 @@ interface UnlockHistoryRow extends RowDataPacket {
   girl_id: number;
   girl_name: string;
   coins_spent: number;
-  thumbnail_key: string | null;
+  photo_key: string | null;
   created_at: Date;
 }
 
@@ -59,7 +59,7 @@ export class HistoryService {
 
     const [rows] = await this.db.query<UnlockHistoryRow[]>(
       `SELECT vu.id, vu.girl_id, g.name AS girl_name, vu.coins_spent,
-              g.thumbnail_key, vu.created_at
+              g.photo_key, vu.created_at
        FROM video_unlocks vu
        JOIN girls g ON g.id = vu.girl_id
        WHERE vu.user_id = ?
@@ -74,8 +74,8 @@ export class HistoryService {
         girlId: row.girl_id,
         girlName: row.girl_name,
         coinsSpent: row.coins_spent,
-        thumbnailUrl: row.thumbnail_key
-          ? await this.storage.getSignedUrl(row.thumbnail_key, ttl)
+        profilePhotoUrl: row.photo_key
+          ? await this.storage.getSignedUrl(row.photo_key, ttl)
           : null,
         createdAt: row.created_at.toISOString(),
       })),
