@@ -1,12 +1,13 @@
+import { Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
   IsInt,
   IsNotEmpty,
   IsOptional,
-  IsPositive,
   IsString,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -25,8 +26,9 @@ export class CreateCreatorDto {
   @MaxLength(100)
   name!: string;
 
+  @Type(() => Number)
   @IsInt()
-  @IsPositive()
+  @Min(0)
   coinPrice!: number;
 }
 
@@ -37,8 +39,9 @@ export class UpdateCreatorDto {
   name?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
-  @IsPositive()
+  @Min(0)
   coinPrice?: number;
 
   @IsOptional()
